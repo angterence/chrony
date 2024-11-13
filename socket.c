@@ -1785,6 +1785,7 @@ SCK_IPSockAddrToSockaddr(IPSockAddr *ip_sa, struct sockaddr *sa, int sa_length)
         return 0;
       memset(sa, 0, sizeof (struct sockaddr_in6));
       sa->sa_family = AF_INET6;
+      ((struct sockaddr_in6 *)sa)->sin6_scope_id = ip_sa->ip_addr.interface;
       memcpy(&((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr, ip_sa->ip_addr.addr.in6,
              sizeof (((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr));
       ((struct sockaddr_in6 *)sa)->sin6_port = htons(ip_sa->port);

@@ -319,7 +319,7 @@ UTI_IPToString(const IPAddr *addr)
       assert(BUFFER_LENGTH >= 40);
       for (a = 0; a < 8; a++)
         snprintf(result + a * 5, 40 - a * 5, "%04x:",
-                 (unsigned int)(ip6[2 * a] << 8 | ip6[2 * a + 1]));_pad
+                 (unsigned int)(ip6[2 * a] << 8 | ip6[2 * a + 1]));
 #endif
       break;
     case IPADDR_ID:

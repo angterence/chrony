@@ -67,6 +67,7 @@ struct RCL_Instance_Record {
   int reached;
   int leap_status;
   int local;
+  int bootstraptime;
   int pps_forced;
   int pps_rate;
   int pps_active;
@@ -182,6 +183,7 @@ RCL_AddRefclock(RefclockParameters *params)
   inst->reached = 0;
   inst->leap_status = LEAP_Normal;
   inst->local = params->local;
+  inst->bootstraptime = params->bootstraptime;
   inst->pps_forced = params->pps_forced;
   inst->pps_rate = params->pps_rate;
   inst->pps_active = 0;
@@ -737,7 +739,13 @@ get_local_stats(RCL_Instance inst, struct timespec *ref, double *freq, double *o
   SST_Stats stats = SRC_GetSourcestats(inst->source);
 
   if (SST_Samples(stats) < SST_GetMinSamples(stats)) {
-    UTI_ZeroTimespec(ref);
+    if (inst->bootstraptime) {
+      LCL_ReadCookedTime(ref, NULL);
+      *freq = 0.0;
+      *offset = 0.0;
+    } else {
+      UTI_ZeroTimespec(ref);
+    }
     return;
   }
 

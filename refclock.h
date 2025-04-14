@@ -38,6 +38,7 @@ typedef struct {
   int poll;
   int filter_length;
   int local;
+  int bootstraptime;
   int pps_forced;
   int pps_rate;
   int min_samples;

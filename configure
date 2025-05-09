@@ -224,6 +224,7 @@ feat_sechash=1
 try_nettle=1
 try_nss=1
 try_tomcrypt=1
+try_wolfssl=0
 feat_nts=1
 try_gnutls=1
 feat_rtc=1
@@ -377,6 +378,9 @@ do
     ;;
     --without-tomcrypt )
       try_tomcrypt=0
+    ;;
+    --enable-wolfssl )
+      try_wolfssl=1
     ;;
     --disable-nts )
       feat_nts=0
@@ -953,6 +957,22 @@ if [ $feat_sechash = "1" ] && [ "x$HASH_LINK" = "x" ] && [ $try_tomcrypt = "1" ]
     HASH_LINK="-ltomcrypt"
     MYCPPFLAGS="$MYCPPFLAGS -I/usr/include/tomcrypt"
     add_def FEAT_SECHASH
+  fi
+fi
+
+if [ $feat_sechash = "1" ] && [ "x$HASH_LINK" = "x" ] && [ $try_wolfssl = "1" ]; then
+
+  test_cflags="`pkg_config --cflags wolfssl`"
+  test_link="`pkg_config --libs wolfssl`"
+
+  if test_code 'wolfssl' 'wolfssl/options.h wolfssl/wolfcrypt/hash.h' "$test_cflags" "$test_link" \
+    'wc_HashGetDigestSize(WC_HASH_TYPE_SHA256);'
+  then
+    HASH_OBJ="hash_wolfssl.o"
+    HASH_LINK="$test_link"
+    MYCPPFLAGS="$MYCPPFLAGS $test_cflags"
+    add_def FEAT_SECHASH
+    add_def HAVE_WOLFSSL
   fi
 fi
 

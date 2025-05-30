@@ -148,3 +148,14 @@ void SYS_LockMemory(void)
 }
 
 /* ================================================== */
+
+void SYS_SetAffinity(ARR_Instance CpuAffinityList)
+{
+#if defined(HAVE_SCHED_SETAFFINITY)
+  SYS_Linux_SetAffinity(CpuAffinityList);
+#else
+  LOG_FATAL("CPU affinity setting is not supported");
+#endif
+}
+
+/* ================================================== */

@@ -493,6 +493,7 @@ int main
   int scfilter_level = 0, lock_memory = 0, sched_priority = 0;
   int clock_control = 1, system_log = 1, log_severity = LOGS_INFO;
   int user_check = 1, config_args = 0, print_config = 0;
+  ARR_Instance cpu_affinity_list;
 
   do_platform_checks();
 
@@ -680,6 +681,12 @@ int main
 
   if (lock_memory || CNF_GetLockMemory()) {
     SYS_LockMemory();
+  }
+
+  cpu_affinity_list = CNF_GetCpuAffinity();
+
+  if(ARR_GetSize(cpu_affinity_list) != 0 ) {
+    SYS_SetAffinity(cpu_affinity_list);
   }
 
   /* Drop root privileges if the specified user has a non-zero UID */

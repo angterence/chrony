@@ -33,6 +33,10 @@
 #include "reference.h"
 #include "sources.h"
 
+#ifdef HAS_CPU_SET_
+#include <sched.h>
+#endif
+
 extern void CNF_Initialise(int restarted, int client_only);
 extern void CNF_Finalise(void);
 
@@ -117,6 +121,7 @@ extern void CNF_SetupAccessRestrictions(void);
 
 extern int CNF_GetSchedPriority(void);
 extern int CNF_GetLockMemory(void);
+extern ARR_Instance CNF_GetCpuAffinity(void);
 
 extern int CNF_GetNTPRateLimit(int *interval, int *burst, int *leak, int *kod);
 extern int CNF_GetNtsRateLimit(int *interval, int *burst, int *leak);

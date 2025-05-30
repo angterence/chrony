@@ -61,6 +61,10 @@
 #include <sys/capability.h>
 #endif
 
+#ifdef HAVE_SCHED_SETAFFINITY
+#include <sched.h>
+#endif
+
 #include "sys_linux.h"
 #include "sys_timex.h"
 #include "conf.h"
@@ -1101,4 +1105,20 @@ SYS_Linux_ReadPHCExtTimestamp(int fd, struct timespec *phc_ts, int *channel)
   return 1;
 }
 
+#endif
+
+#ifdef HAVE_SCHED_SETAFFINITY
+void SYS_Linux_SetAffinity(ARR_Instance CpuAffinityList)
+{
+  int i;
+  cpu_set_t mask;
+  CPU_ZERO(&mask);
+  for (i = 0; i < ARR_GetSize(CpuAffinityList); i++) {
+    CPU_SET(*(int *)ARR_GetElement(CpuAffinityList, i), &mask);
+  }
+
+  if (sched_setaffinity(0, CPU_SETSIZE, &mask) != 0) {
+    LOG_FATAL("sched_setaffinity failed (%s)", strerror(errno));
+  }
+}
 #endif

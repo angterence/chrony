@@ -2987,6 +2987,14 @@ On macOS, this directive uses the *thread_policy_set()* kernel call to
 specify real-time scheduling. As noted above, you should not use this directive
 unless you really need it.
 
+[[cpu_affinity]]*cpu_affinity* _CPU_ID_ ... ::
+This directive specifies a list of CPUs on which the OS kernel will be allowed
+to schedule the chrony thread. This is meant to assist users who desire to
+isolate specific CPU cores, and prevent any OS "overheads" (such as chrony)
+from running on these cores. Note that this directive only sets the chrony
+process CPU affinity (via sched_setaffinity), and network traffic processing
+might still occur on other CPU cores.
+
 [[user]]*user* _user_::
 The *user* directive sets the name of the system user to which *chronyd* will
 switch after start in order to drop root privileges.

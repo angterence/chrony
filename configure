@@ -239,6 +239,7 @@ feat_phc=1
 try_phc=0
 feat_pps=1
 try_setsched=0
+try_setaffinity=0
 try_lockmem=0
 feat_forcednsretry=1
 try_aes_gcm_siv=1
@@ -414,6 +415,7 @@ case $OPERATINGSYSTEM in
         [ $try_seccomp != "0" ] && try_seccomp=1
         try_timestamping=1
         try_setsched=1
+        try_setaffinity=1
         try_lockmem=1
         try_phc=1
         try_arc4random=0
@@ -426,6 +428,7 @@ case $OPERATINGSYSTEM in
         try_recvmmsg=0
         EXTRA_OBJECTS="sys_generic.o sys_netbsd.o sys_timex.o sys_posix.o"
         try_setsched=1
+        try_setaffinity=1
         try_lockmem=1
         add_def FREEBSD
         if [ $feat_droproot = "1" ]; then
@@ -438,6 +441,7 @@ case $OPERATINGSYSTEM in
         EXTRA_OBJECTS="sys_generic.o sys_netbsd.o sys_timex.o sys_posix.o"
         try_clockctl=1
         try_setsched=1
+        try_setaffinity=1
         try_lockmem=1
         add_def NETBSD
         echo "Configuring for $SYSTEM"
@@ -835,6 +839,16 @@ if [ $try_setsched = "1" ] && \
      pthread_setschedparam(pthread_self(), SCHED_FIFO, &sched);'
 then
   add_def HAVE_PTHREAD_SETSCHEDPARAM
+fi
+
+if [ $try_setaffinity = "1" ] && \
+  test_code \
+    'sched_setaffinity()' \
+    'sched.h' '-pthread' '' '
+     cpu_set_t mask;
+     sched_setaffinity(0, CPU_SETSIZE, &mask);'
+then
+  add_def HAVE_SCHED_SETAFFINITY
 fi
 
 if [ $try_lockmem = "1" ] && \

@@ -605,19 +605,14 @@ measurement_timeout(void *any)
 
 /* ================================================== */
 
-static void
-set_rtc(time_t new_rtc_time)
+int
+RTC_Linux_WriteTime(int fd, int utc, time_t new_rtc_time)
 {
   struct rtc_time rtc_raw;
-  int status;
 
-  rtc_from_t(&new_rtc_time, &rtc_raw, rtc_on_utc);
+  rtc_from_t(&new_rtc_time, &rtc_raw, utc);
 
-  status = ioctl(fd, RTC_SET_TIME, &rtc_raw);
-  if (status < 0) {
-    LOG(LOGS_ERR, "Could not set RTC time");
-  }
-
+  return ioctl(fd, RTC_SET_TIME, &rtc_raw);
 }
 
 /* ================================================== */
@@ -1051,6 +1046,7 @@ int
 RTC_Linux_Trim(void)
 {
   struct timespec now;
+  int status;
 
   /* Remember the slope coefficient - we won't be able to determine a
      good one in a few seconds when we determine the new offset! */
@@ -1070,8 +1066,11 @@ RTC_Linux_Trim(void)
        the rounded down part of S, i.e. the seconds part. */
 
     LCL_ReadCookedTime(&now, NULL);
-    
-    set_rtc(now.tv_sec);
+
+    status = RTC_Linux_WriteTime(fd, rtc_on_utc, now.tv_sec);
+    if (status < 0) {
+      LOG(LOGS_ERR, "Could not set RTC time");
+    }
 
     /* All old samples will now look bogus under the new
            regime. */

@@ -50,5 +50,6 @@ extern time_t RTC_Linux_ReadTimeAfterInterrupt(int fd, int utc,
 extern time_t RTC_Linux_ReadTimeNow(int fd, int utc,
                                     struct timespec *sys_time_cooked,
                                     struct timespec *sys_time_raw);
+extern int RTC_Linux_WriteTime(int fd, int utc, time_t ts);
 
 #endif /* _GOT_RTC_LINUX_H */

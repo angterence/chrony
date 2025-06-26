@@ -404,6 +404,11 @@ RCL_GetDriverOption(RCL_Instance instance, char *name)
   return NULL;
 }
 
+int RCL_IsLocal(RCL_Instance instance)
+{
+  return instance->local;
+}
+
 static int
 convert_tai_offset(struct timespec *sample_time, double *offset)
 {

@@ -124,6 +124,8 @@ static int refrtc_initialise(RCL_Instance instance)
   if (status) {
     SCH_AddFileHandler(rtcfd, SCH_FILE_INPUT, refrtc_read_after_uie, instance);
     rtc->polling = 0;
+  } else if (RCL_IsLocal(instance)) {
+    LOG_FATAL("RTC as local refclock requires interrupt support");
   } else {
     LOG(LOGS_INFO, "Falling back to polling for %s", path);
     rtc->polling = 1;

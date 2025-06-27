@@ -2794,14 +2794,31 @@ process_cmd_manual_delete(CMD_Request *msg, const char *line)
 /* ================================================== */
 
 static int
-process_cmd_settime(char *line)
+process_cmd_settime_manual(const struct timespec *ts)
 {
-  struct timespec ts;
-  time_t now, new_time;
   CMD_Request request;
   CMD_Reply reply;
   double dfreq_ppm, new_afreq_ppm;
   double offset;
+
+  UTI_TimespecHostToNetwork(ts, &request.data.settime.ts);
+  request.command = htons(REQ_SETTIME);
+  if (request_reply(&request, &reply, RPY_MANUAL_TIMESTAMP2, 1)) {
+    offset = UTI_FloatNetworkToHost(reply.data.manual_timestamp.offset);
+    dfreq_ppm = UTI_FloatNetworkToHost(reply.data.manual_timestamp.dfreq_ppm);
+    new_afreq_ppm = UTI_FloatNetworkToHost(reply.data.manual_timestamp.new_afreq_ppm);
+    printf("Clock was %.2f seconds fast.  Frequency change = %.2fppm, new frequency = %.2fppm\n",
+        offset, dfreq_ppm, new_afreq_ppm);
+    return 1;
+  }
+  return 0;
+}
+
+static int
+process_cmd_settime(char *line)
+{
+  struct timespec ts;
+  time_t now, new_time;
 
   now = time(NULL);
   new_time = get_date(line, &now);
@@ -2811,16 +2828,7 @@ process_cmd_settime(char *line)
   } else {
     ts.tv_sec = new_time;
     ts.tv_nsec = 0;
-    UTI_TimespecHostToNetwork(&ts, &request.data.settime.ts);
-    request.command = htons(REQ_SETTIME);
-    if (request_reply(&request, &reply, RPY_MANUAL_TIMESTAMP2, 1)) {
-          offset = UTI_FloatNetworkToHost(reply.data.manual_timestamp.offset);
-          dfreq_ppm = UTI_FloatNetworkToHost(reply.data.manual_timestamp.dfreq_ppm);
-          new_afreq_ppm = UTI_FloatNetworkToHost(reply.data.manual_timestamp.new_afreq_ppm);
-          printf("Clock was %.2f seconds fast.  Frequency change = %.2fppm, new frequency = %.2fppm\n",
-              offset, dfreq_ppm, new_afreq_ppm);
-          return 1;
-    }
+    return process_cmd_settime_manual(&ts);
   }
   return 0;
 }

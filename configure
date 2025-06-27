@@ -1057,7 +1057,9 @@ if [ $feat_nts = "1" ] && [ $try_wolfssl = "1" ] && ! grep '#define HAVE_SIV' co
   if test_code 'SIV in wolfSSL' 'wolfssl/options.h wolfssl/wolfcrypt/aes.h' "$test_cflags" "$test_link $LIBS" \
     'wc_AesSivEncrypt(NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, NULL);'
   then
-    EXTRA_OBJECTS="$EXTRA_OBJECTS siv_wolfssl.o"
+    EXTRA_OBJECTS="$EXTRA_OBJECTS siv_wolfssl.o tls_wolfssl.o"
+    LIBS="$LIBS $test_link"
+    MYCPPFLAGS="$MYCPPFLAGS $test_cflags"
     add_def HAVE_SIV
   fi
 fi

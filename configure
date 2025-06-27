@@ -1046,6 +1046,22 @@ if [ $feat_nts = "1" ] && [ $try_gnutls = "1" ]; then
   fi
 fi
 
+if [ $feat_nts = "1" ] && [ $try_wolfssl = "1" ] && ! grep '#define HAVE_SIV' config.h > /dev/null; then
+  if [ "$HASH_OBJ" = "hash_wolfssl.o" ]; then
+    test_cflags=""
+    test_link=""
+  else
+    test_cflags="`pkg_config --cflags wolfssl`"
+    test_link="`pkg_config --libs wolfssl`"
+  fi
+  if test_code 'SIV in wolfSSL' 'wolfssl/options.h wolfssl/wolfcrypt/aes.h' "$test_cflags" "$test_link $LIBS" \
+    'wc_AesSivEncrypt(NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, NULL);'
+  then
+    EXTRA_OBJECTS="$EXTRA_OBJECTS siv_wolfssl.o"
+    add_def HAVE_SIV
+  fi
+fi
+
 if [ $feat_nts = "1" ] && grep '#define HAVE_SIV' config.h > /dev/null; then
   EXTRA_OBJECTS="$EXTRA_OBJECTS nts_ke_client.o nts_ke_server.o nts_ke_session.o"
   EXTRA_OBJECTS="$EXTRA_OBJECTS nts_ntp_auth.o nts_ntp_client.o nts_ntp_server.o"

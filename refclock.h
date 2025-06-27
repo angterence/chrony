@@ -62,6 +62,7 @@ typedef struct {
   int (*init)(RCL_Instance instance);
   void (*fini)(RCL_Instance instance);
   int (*poll)(RCL_Instance instance);
+  int (*settime)(RCL_Instance instance, const struct timespec *ts, double *offset);
 } RefclockDriver;
 
 extern void RCL_Initialise(void);
@@ -70,6 +71,7 @@ extern int RCL_AddRefclock(RefclockParameters *params);
 extern void RCL_StartRefclocks(void);
 extern void RCL_ReportSource(RPT_SourceReport *report, struct timespec *now);
 extern int RCL_ModifyOffset(uint32_t ref_id, double offset);
+extern int RCL_SetTime(uint32_t ref_id, const struct timespec *ts, double *offset);
 
 /* functions used by drivers */
 extern void RCL_SetDriverData(RCL_Instance instance, void *data);

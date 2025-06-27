@@ -174,11 +174,12 @@ static int refrtc_poll(RCL_Instance instance)
 RefclockDriver RCL_RTC_driver = {
   refrtc_initialise,
   refrtc_finalise,
-  refrtc_poll
+  refrtc_poll,
+  NULL
 };
 
 #else
 
-RefclockDriver RCL_RTC_driver = { NULL, NULL, NULL };
+RefclockDriver RCL_RTC_driver = { NULL, NULL, NULL, NULL };
 
 #endif

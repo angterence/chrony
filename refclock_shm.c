@@ -132,5 +132,6 @@ static int shm_poll(RCL_Instance instance)
 RefclockDriver RCL_SHM_driver = {
   shm_initialise,
   shm_finalise,
-  shm_poll
+  shm_poll,
+  NULL
 };

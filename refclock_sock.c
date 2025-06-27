@@ -174,5 +174,6 @@ static void sock_finalise(RCL_Instance instance)
 RefclockDriver RCL_SOCK_driver = {
   sock_initialise,
   sock_finalise,
+  NULL,
   NULL
 };

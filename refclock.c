@@ -337,6 +337,24 @@ RCL_ModifyOffset(uint32_t ref_id, double offset)
   return 0;
 }
 
+int
+RCL_SetTime(uint32_t ref_id, const struct timespec *ts, double *offset)
+{
+  RCL_Instance inst = find_refclock_by_id(ref_id);
+
+  if (inst && inst->driver->settime) {
+    if (inst->driver->settime(inst, ts, offset)) {
+      SPF_DropSamples(inst->filter);
+      SST_ResetInstance(SRC_GetSourcestats(inst->source));
+
+      DEBUG_LOG("Refclock %s was %.2f seconds fast",
+		UTI_RefidToString(inst->ref_id), *offset);
+      return 1;
+    }
+  }
+  return 0;
+}
+
 void
 RCL_SetDriverData(RCL_Instance instance, void *data)
 {

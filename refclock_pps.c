@@ -151,11 +151,12 @@ static int pps_poll(RCL_Instance instance)
 RefclockDriver RCL_PPS_driver = {
   pps_initialise,
   pps_finalise,
-  pps_poll
+  pps_poll,
+  NULL
 };
 
 #else
 
-RefclockDriver RCL_PPS_driver = { NULL, NULL, NULL };
+RefclockDriver RCL_PPS_driver = { NULL, NULL, NULL, NULL };
 
 #endif

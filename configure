@@ -973,6 +973,14 @@ if [ $feat_sechash = "1" ] && [ "x$HASH_LINK" = "x" ] && [ $try_wolfssl = "1" ];
     MYCPPFLAGS="$MYCPPFLAGS $test_cflags"
     add_def FEAT_SECHASH
     add_def HAVE_WOLFSSL
+
+    if test_code 'CMAC in wolfSSL' 'wolfssl/options.h wolfssl/wolfcrypt/cmac.h' "$test_cflags" "$test_link" \
+      'wc_InitCmac(NULL, NULL, 0, 0, NULL);'
+    then
+      add_def HAVE_CMAC
+      EXTRA_OBJECTS="$EXTRA_OBJECTS cmac_wolfssl.o"
+      EXTRA_CLI_OBJECTS="$EXTRA_CLI_OBJECTS cmac_wolfssl.o"
+    fi
   fi
 fi
 

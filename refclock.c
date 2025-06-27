@@ -296,37 +296,43 @@ RCL_StartRefclocks(void)
   }
 }
 
-void
-RCL_ReportSource(RPT_SourceReport *report, struct timespec *now)
+static RCL_Instance
+find_refclock_by_id(uint32_t ref_id)
 {
   unsigned int i;
-  uint32_t ref_id;
-
-  assert(report->ip_addr.family == IPADDR_INET4);
-  ref_id = report->ip_addr.addr.in4;
 
   for (i = 0; i < ARR_GetSize(refclocks); i++) {
     RCL_Instance inst = get_refclock(i);
     if (inst->ref_id == ref_id) {
-      report->poll = inst->poll;
-      report->mode = RPT_LOCAL_REFERENCE;
-      break;
+      return inst;
     }
+  }
+  return NULL;
+}
+
+void
+RCL_ReportSource(RPT_SourceReport *report, struct timespec *now)
+{
+  RCL_Instance inst;
+
+  assert(report->ip_addr.family == IPADDR_INET4);
+
+  inst = find_refclock_by_id(report->ip_addr.addr.in4);
+  if (inst) {
+    report->poll = inst->poll;
+    report->mode = RPT_LOCAL_REFERENCE;
   }
 }
 
 int
 RCL_ModifyOffset(uint32_t ref_id, double offset)
 {
-  unsigned int i;
+  RCL_Instance inst = find_refclock_by_id(ref_id);
 
-  for (i = 0; i < ARR_GetSize(refclocks); i++) {
-    RCL_Instance inst = get_refclock(i);
-    if (inst->ref_id == ref_id) {
-      inst->offset = offset;
-      LOG(LOGS_INFO, "Source %s new offset %f", UTI_RefidToString(ref_id), offset);
-      return 1;
-    }
+  if (inst) {
+    inst->offset = offset;
+    LOG(LOGS_INFO, "Source %s new offset %f", UTI_RefidToString(ref_id), offset);
+    return 1;
   }
   return 0;
 }

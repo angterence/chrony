@@ -171,11 +171,34 @@ static int refrtc_poll(RCL_Instance instance)
   return refrtc_add_sample(instance, &now, rtc_sec, 500000000);
 }
 
+static int refrtc_settime(RCL_Instance instance,
+                          const struct timespec *ts_new, double *offset)
+{
+  struct refrtc_instance *rtc;
+  time_t rtc_sec;
+  int status;
+
+  rtc = RCL_GetDriverData(instance);
+
+  rtc_sec = RTC_Linux_ReadTimeNow(rtc->fd, rtc->utc, NULL, NULL);
+  if (rtc_sec == (time_t)-1) {
+    rtc_sec = 0;
+  }
+
+  status = RTC_Linux_WriteTime(rtc->fd, rtc->utc, ts_new->tv_sec);
+  if (status < 0) {
+    return 0;
+  }
+
+  *offset = rtc_sec - ts_new->tv_sec;
+  return 1;
+}
+
 RefclockDriver RCL_RTC_driver = {
   refrtc_initialise,
   refrtc_finalise,
   refrtc_poll,
-  NULL
+  refrtc_settime
 };
 
 #else

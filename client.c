@@ -1088,7 +1088,7 @@ give_help(void)
     "manual off|on|reset\0Disable/enable/reset settime command\0"
     "manual list\0Show previous settime entries\0"
     "manual delete <index>\0Delete previous settime entry\0"
-    "settime <time>\0Set daemon time\0"
+    "settime [-r <refid>] <time>\0Set daemon or reference clock time\0"
     "\0(e.g. Sep 25, 2015 16:30:05 or 16:30:05)\0"
     "\0\0NTP access:\0\0"
     "accheck <address>\0Check whether address is allowed\0"
@@ -2794,6 +2794,31 @@ process_cmd_manual_delete(CMD_Request *msg, const char *line)
 /* ================================================== */
 
 static int
+process_cmd_settime_refclock(const struct timespec *ts, char *refclock)
+{
+  CMD_Request request;
+  CMD_Reply reply;
+  double offset;
+  uint32_t ref_id;
+
+  if (CPS_ParseRefid(refclock, &ref_id) == 0) {
+    printf("510 - Could not parse reference clock\n");
+    return 0;
+  }
+
+  request.command = htons(REQ_SETTIME_REFCLOCK);
+  request.data.settime_refclk.ref_id = htonl(ref_id);
+
+  UTI_TimespecHostToNetwork(ts, &request.data.settime_refclk.ts);
+  if (request_reply(&request, &reply, RPY_TIMESTAMP_OFFSET, 1)) {
+    offset = UTI_FloatNetworkToHost(reply.data.timestamp_offset.offset);
+    printf("Reference clock was %.2f seconds fast\n", offset);
+    return 1;
+  }
+  return 0;
+}
+
+static int
 process_cmd_settime_manual(const struct timespec *ts)
 {
   CMD_Request request;
@@ -2819,6 +2844,12 @@ process_cmd_settime(char *line)
 {
   struct timespec ts;
   time_t now, new_time;
+  char *refclock = NULL;
+
+  if (!strncmp(line, "-r ", 3)) {
+    refclock = line + 3;
+    line = CPS_SplitWord(refclock);
+  }
 
   now = time(NULL);
   new_time = get_date(line, &now);
@@ -2828,7 +2859,12 @@ process_cmd_settime(char *line)
   } else {
     ts.tv_sec = new_time;
     ts.tv_nsec = 0;
-    return process_cmd_settime_manual(&ts);
+
+    if (refclock) {
+      return process_cmd_settime_refclock(&ts, refclock);
+    } else {
+      return process_cmd_settime_manual(&ts);
+    }
   }
   return 0;
 }

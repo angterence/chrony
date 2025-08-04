@@ -111,7 +111,8 @@
 #define REQ_MODIFY_SELECTOPTS 72
 #define REQ_MODIFY_OFFSET 73
 #define REQ_LOCAL3 74
-#define N_REQUEST_TYPES 75
+#define REQ_SETTIME_REFCLOCK 75
+#define N_REQUEST_TYPES 76
 
 /* Structure used to exchange timespecs independent of time_t size */
 typedef struct {
@@ -226,6 +227,12 @@ typedef struct {
   Timespec ts;
   int32_t EOR;
 } REQ_Settime;
+
+typedef struct {
+  Timespec ts;
+  uint32_t ref_id;
+  int32_t EOR;
+} REQ_Settime_Refclk;
 
 typedef struct {
   int32_t on_off;
@@ -483,6 +490,7 @@ typedef struct {
     REQ_Modify_Maxupdateskew modify_maxupdateskew;
     REQ_Modify_Makestep modify_makestep;
     REQ_Settime settime;
+    REQ_Settime_Refclk settime_refclk;
     REQ_Local local;
     REQ_Manual manual;
     REQ_Source_Data source_data;
@@ -540,7 +548,8 @@ typedef struct {
 #define RPY_SERVER_STATS3 24
 #define RPY_SERVER_STATS4 25
 #define RPY_NTP_DATA2 26
-#define N_REPLY_TYPES 27
+#define RPY_TIMESTAMP_OFFSET 27
+#define N_REPLY_TYPES 28
 
 /* Status codes */
 #define STT_SUCCESS 0
@@ -648,6 +657,11 @@ typedef struct {
   Float new_afreq_ppm;
   int32_t EOR;
 } RPY_ManualTimestamp;
+
+typedef struct {
+  Float offset;
+  int32_t EOR;
+} RPY_TimestampOffset;
 
 typedef struct {
   IPAddr ip;
@@ -835,6 +849,7 @@ typedef struct {
     RPY_N_Sources n_sources;
     RPY_Source_Data source_data;
     RPY_ManualTimestamp manual_timestamp;
+    RPY_TimestampOffset timestamp_offset;
     RPY_Tracking tracking;
     RPY_Sourcestats sourcestats;
     RPY_Rtc rtc;

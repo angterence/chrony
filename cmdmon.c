@@ -423,7 +423,28 @@ handle_modify_makestep(CMD_Request *rx_message, CMD_Reply *tx_message)
 /* ================================================== */
 
 static void
-handle_settime(CMD_Request *rx_message, CMD_Reply *tx_message)
+handle_settime_refclock(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  struct timespec ts;
+  double offset;
+  uint32_t ref_id;
+
+  UTI_TimespecNetworkToHost(&rx_message->data.settime_refclk.ts, &ts);
+
+  ref_id = ntohl(rx_message->data.settime_refclk.ref_id);
+
+  if (RCL_SetTime(ref_id, &ts, &offset)) {
+    tx_message->reply = htons(RPY_TIMESTAMP_OFFSET);
+    tx_message->data.timestamp_offset.offset = UTI_FloatHostToNetwork(offset);
+  } else {
+    tx_message->status = htons(STT_FAILED);
+  }
+}
+
+/* ================================================== */
+
+static void
+handle_settime_manual(CMD_Request *rx_message, CMD_Reply *tx_message)
 {
   struct timespec ts;
   double offset, dfreq_ppm, new_afreq_ppm;
@@ -1481,7 +1502,10 @@ handle_readwrite_commands(int command, CMD_Request *request, CMD_Reply *reply)
       handle_reset_sources(request, reply);
       break;
     case REQ_SETTIME:
-      handle_settime(request, reply);
+      handle_settime_manual(request, reply);
+      break;
+    case REQ_SETTIME_REFCLOCK:
+      handle_settime_refclock(request, reply);
       break;
     case REQ_SHUTDOWN:
       handle_shutdown(request, reply);

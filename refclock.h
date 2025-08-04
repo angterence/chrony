@@ -38,6 +38,7 @@ typedef struct {
   int poll;
   int filter_length;
   int local;
+  int bootstraptime;
   int pps_forced;
   int pps_rate;
   int min_samples;
@@ -61,6 +62,7 @@ typedef struct {
   int (*init)(RCL_Instance instance);
   void (*fini)(RCL_Instance instance);
   int (*poll)(RCL_Instance instance);
+  int (*settime)(RCL_Instance instance, const struct timespec *ts, double *offset);
 } RefclockDriver;
 
 extern void RCL_Initialise(void);
@@ -69,6 +71,7 @@ extern int RCL_AddRefclock(RefclockParameters *params);
 extern void RCL_StartRefclocks(void);
 extern void RCL_ReportSource(RPT_SourceReport *report, struct timespec *now);
 extern int RCL_ModifyOffset(uint32_t ref_id, double offset);
+extern int RCL_SetTime(uint32_t ref_id, const struct timespec *ts, double *offset);
 
 /* functions used by drivers */
 extern void RCL_SetDriverData(RCL_Instance instance, void *data);
@@ -76,6 +79,7 @@ extern void *RCL_GetDriverData(RCL_Instance instance);
 extern char *RCL_GetDriverParameter(RCL_Instance instance);
 extern void RCL_CheckDriverOptions(RCL_Instance instance, const char **options);
 extern char *RCL_GetDriverOption(RCL_Instance instance, char *name);
+extern int RCL_IsLocal(RCL_Instance instance);
 extern int RCL_AddSample(RCL_Instance instance, struct timespec *sample_time,
                          struct timespec *ref_time, int leap);
 extern int RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second);

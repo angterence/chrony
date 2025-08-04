@@ -1118,6 +1118,16 @@ settime Nov 21, 2015 16:30:05
 For a full description of getdate, see the getdate documentation
 (bundled, for example, with the source for GNU tar).
 
+[[settime_refclk]]*settime* *-r* _refid_ _time_::
+When given a reference clock's ID as argument, the *settime* command will set
+the reference clock's time to the manually entered time. This will discard
+all collected samples and statistics so far.
+The daemon time stays unaffected in this situation.
++
+This is useful mainly for RTCs used as local reference clocks, as the
+kernel prohibits other clients from opening the device file for as long
+*chronyd* is holding an open file descriptor.
+
 === NTP access
 
 [[accheck]]*accheck* _address_::

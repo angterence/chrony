@@ -609,7 +609,11 @@ refclock PHC /dev/ptp2:extpps:pin=1 width 0.2 poll 2
 Driver for using the Real Time Clock (RTC) as a reference clock. The parameter
 is the path to the RTC character device which should be used as a time source.
 This driver cannot be used together with the <<rtcfile,*rtcfile*>> or
-<<rtcsync,*rtcsync*>> directive. The driver supports the following option:
+<<rtcsync,*rtcsync*>> directive.
+The driver tries to subscribe for UIE interrupts and falls back to less accurate
+polling otherwise. UIE support for the RTC is required, when the <<local,*local*>>
+directive is specified.
+The driver supports the following option:
 +
 *utc*::::
 Assume that RTC keeps Universal Coordinated Time (UTC) instead of local

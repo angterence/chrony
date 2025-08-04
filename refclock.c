@@ -67,6 +67,7 @@ struct RCL_Instance_Record {
   int reached;
   int leap_status;
   int local;
+  int bootstraptime;
   int pps_forced;
   int pps_rate;
   int pps_active;
@@ -182,6 +183,7 @@ RCL_AddRefclock(RefclockParameters *params)
   inst->reached = 0;
   inst->leap_status = LEAP_Normal;
   inst->local = params->local;
+  inst->bootstraptime = params->bootstraptime;
   inst->pps_forced = params->pps_forced;
   inst->pps_rate = params->pps_rate;
   inst->pps_active = 0;
@@ -294,35 +296,59 @@ RCL_StartRefclocks(void)
   }
 }
 
-void
-RCL_ReportSource(RPT_SourceReport *report, struct timespec *now)
+static RCL_Instance
+find_refclock_by_id(uint32_t ref_id)
 {
   unsigned int i;
-  uint32_t ref_id;
-
-  assert(report->ip_addr.family == IPADDR_INET4);
-  ref_id = report->ip_addr.addr.in4;
 
   for (i = 0; i < ARR_GetSize(refclocks); i++) {
     RCL_Instance inst = get_refclock(i);
     if (inst->ref_id == ref_id) {
-      report->poll = inst->poll;
-      report->mode = RPT_LOCAL_REFERENCE;
-      break;
+      return inst;
     }
+  }
+  return NULL;
+}
+
+void
+RCL_ReportSource(RPT_SourceReport *report, struct timespec *now)
+{
+  RCL_Instance inst;
+
+  assert(report->ip_addr.family == IPADDR_INET4);
+
+  inst = find_refclock_by_id(report->ip_addr.addr.in4);
+  if (inst) {
+    report->poll = inst->poll;
+    report->mode = RPT_LOCAL_REFERENCE;
   }
 }
 
 int
 RCL_ModifyOffset(uint32_t ref_id, double offset)
 {
-  unsigned int i;
+  RCL_Instance inst = find_refclock_by_id(ref_id);
 
-  for (i = 0; i < ARR_GetSize(refclocks); i++) {
-    RCL_Instance inst = get_refclock(i);
-    if (inst->ref_id == ref_id) {
-      inst->offset = offset;
-      LOG(LOGS_INFO, "Source %s new offset %f", UTI_RefidToString(ref_id), offset);
+  if (inst) {
+    inst->offset = offset;
+    LOG(LOGS_INFO, "Source %s new offset %f", UTI_RefidToString(ref_id), offset);
+    return 1;
+  }
+  return 0;
+}
+
+int
+RCL_SetTime(uint32_t ref_id, const struct timespec *ts, double *offset)
+{
+  RCL_Instance inst = find_refclock_by_id(ref_id);
+
+  if (inst && inst->driver->settime) {
+    if (inst->driver->settime(inst, ts, offset)) {
+      SPF_DropSamples(inst->filter);
+      SST_ResetInstance(SRC_GetSourcestats(inst->source));
+
+      DEBUG_LOG("Refclock %s was %.2f seconds fast",
+		UTI_RefidToString(inst->ref_id), *offset);
       return 1;
     }
   }
@@ -402,6 +428,11 @@ RCL_GetDriverOption(RCL_Instance instance, char *name)
   }
 
   return NULL;
+}
+
+int RCL_IsLocal(RCL_Instance instance)
+{
+  return instance->local;
 }
 
 static int
@@ -732,7 +763,13 @@ get_local_stats(RCL_Instance inst, struct timespec *ref, double *freq, double *o
   SST_Stats stats = SRC_GetSourcestats(inst->source);
 
   if (SST_Samples(stats) < SST_GetMinSamples(stats)) {
-    UTI_ZeroTimespec(ref);
+    if (inst->bootstraptime) {
+      LCL_ReadCookedTime(ref, NULL);
+      *freq = 0.0;
+      *offset = 0.0;
+    } else {
+      UTI_ZeroTimespec(ref);
+    }
     return;
   }
 

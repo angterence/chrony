@@ -227,11 +227,12 @@ static int phc_poll(RCL_Instance instance)
 RefclockDriver RCL_PHC_driver = {
   phc_initialise,
   phc_finalise,
-  phc_poll
+  phc_poll,
+  NULL
 };
 
 #else
 
-RefclockDriver RCL_PHC_driver = { NULL, NULL, NULL };
+RefclockDriver RCL_PHC_driver = { NULL, NULL, NULL, NULL };
 
 #endif

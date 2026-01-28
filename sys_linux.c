@@ -752,14 +752,16 @@ SYS_Linux_CheckKernelVersion(int req_major, int req_minor)
 #if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
 
 static int
-get_phc_readings(int phc_fd, int max_samples, struct timespec ts[][3])
+get_phc_readings(int phc_fd, clockid_t sys_clock, int max_samples, struct timespec ts[][3])
 {
   struct ptp_sys_offset sys_off;
   int i;
 
+  if (sys_clock != CLOCK_REALTIME)
+    return 0;
+
   max_samples = CLAMP(0, max_samples, PTP_MAX_SAMPLES);
 
-  /* Silence valgrind */
   memset(&sys_off, 0, sizeof (sys_off));
 
   sys_off.n_samples = max_samples;
@@ -784,7 +786,8 @@ get_phc_readings(int phc_fd, int max_samples, struct timespec ts[][3])
 /* ================================================== */
 
 static int
-get_extended_phc_readings(int phc_fd, int max_samples, struct timespec ts[][3])
+get_extended_phc_readings(int phc_fd, clockid_t sys_clock, int max_samples,
+                          struct timespec ts[][3])
 {
 #ifdef PTP_SYS_OFFSET_EXTENDED
   struct ptp_sys_offset_extended sys_off;
@@ -792,10 +795,11 @@ get_extended_phc_readings(int phc_fd, int max_samples, struct timespec ts[][3])
 
   max_samples = CLAMP(0, max_samples, PTP_MAX_SAMPLES);
 
-  /* Silence valgrind */
   memset(&sys_off, 0, sizeof (sys_off));
 
   sys_off.n_samples = max_samples;
+  /* TODO: add configure check - patch by Chris */
+  sys_off.clockid = sys_clock;
 
   if (ioctl(phc_fd, PTP_SYS_OFFSET_EXTENDED, &sys_off)) {
     DEBUG_LOG("ioctl(%s) failed : %s", "PTP_SYS_OFFSET_EXTENDED", strerror(errno));
@@ -820,15 +824,16 @@ get_extended_phc_readings(int phc_fd, int max_samples, struct timespec ts[][3])
 /* ================================================== */
 
 static int
-get_precise_phc_readings(int phc_fd, int max_samples, struct timespec ts[][3])
+get_precise_phc_readings(int phc_fd, clockid_t sys_clock, int max_samples,
+                         struct timespec ts[][3])
 {
 #ifdef PTP_SYS_OFFSET_PRECISE
   struct ptp_sys_offset_precise sys_off;
 
-  if (max_samples < 1)
+  if (max_samples < 1 ||
+      (sys_clock != CLOCK_REALTIME && sys_clock != CLOCK_MONOTONIC_RAW))
     return 0;
 
-  /* Silence valgrind */
   memset(&sys_off, 0, sizeof (sys_off));
 
   if (ioctl(phc_fd, PTP_SYS_OFFSET_PRECISE, &sys_off)) {
@@ -837,8 +842,13 @@ get_precise_phc_readings(int phc_fd, int max_samples, struct timespec ts[][3])
     return 0;
   }
 
-  ts[0][0].tv_sec = sys_off.sys_realtime.sec;
-  ts[0][0].tv_nsec = sys_off.sys_realtime.nsec;
+  if (sys_clock == CLOCK_REALTIME) {
+    ts[0][0].tv_sec = sys_off.sys_realtime.sec;
+    ts[0][0].tv_nsec = sys_off.sys_realtime.nsec;
+  } else {
+    ts[0][0].tv_sec = sys_off.sys_monoraw.sec;
+    ts[0][0].tv_nsec = sys_off.sys_monoraw.nsec;
+  }
   ts[0][1].tv_sec = sys_off.device.sec;
   ts[0][1].tv_nsec = sys_off.device.nsec;
   ts[0][2] = ts[0][0];
@@ -951,19 +961,19 @@ SYS_Linux_OpenPHC(const char *device, int flags)
 /* ================================================== */
 
 int
-SYS_Linux_GetPHCReadings(int fd, int nocrossts, int *reading_mode, int max_readings,
-                         struct timespec tss[][3])
+SYS_Linux_GetPHCReadings(int fd, clockid_t sys_clock, int nocrossts, int *reading_mode,
+                         int max_readings, struct timespec tss[][3])
 {
   int r = 0;
 
   if ((*reading_mode == 2 || *reading_mode == 0) && !nocrossts &&
-      (r = get_precise_phc_readings(fd, max_readings, tss)) > 0) {
+      (r = get_precise_phc_readings(fd, sys_clock, max_readings, tss)) > 0) {
     *reading_mode = 2;
   } else if ((*reading_mode == 3 || *reading_mode == 0) &&
-             (r = get_extended_phc_readings(fd, max_readings, tss)) > 0) {
+             (r = get_extended_phc_readings(fd, sys_clock, max_readings, tss)) > 0) {
     *reading_mode = 3;
   } else if ((*reading_mode == 1 || *reading_mode == 0) &&
-             (r = get_phc_readings(fd, max_readings, tss)) > 0) {
+             (r = get_phc_readings(fd, sys_clock, max_readings, tss)) > 0) {
     *reading_mode = 1;
   }
 

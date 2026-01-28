@@ -210,7 +210,7 @@ static int phc_poll(RCL_Instance instance)
 
   phc = (struct phc_instance *)RCL_GetDriverData(instance);
 
-  n_readings = SYS_Linux_GetPHCReadings(phc->fd, phc->nocrossts, &phc->mode,
+  n_readings = SYS_Linux_GetPHCReadings(phc->fd, CLOCK_REALTIME, phc->nocrossts, &phc->mode,
                                         PHC_READINGS, readings);
   if (n_readings < 1)
     return 0;

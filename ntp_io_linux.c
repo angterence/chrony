@@ -579,7 +579,7 @@ poll_phc(struct Interface *iface, struct timespec *now)
   DEBUG_LOG("Polling PHC on %s%s",
             iface->name, iface->poll_timeout_id != 0 ? " before timeout" : "");
 
-  n_readings = SYS_Linux_GetPHCReadings(iface->phc_fd, iface->phc_nocrossts,
+  n_readings = SYS_Linux_GetPHCReadings(iface->phc_fd, CLOCK_REALTIME, iface->phc_nocrossts,
                                         &iface->phc_mode, PHC_READINGS, phc_readings);
 
   /* Add timeout for the next poll in case no HW timestamp will be captured

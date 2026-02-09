@@ -46,6 +46,7 @@
 #include "sourcestats.h"
 #include "reference.h"
 #include "logging.h"
+#include "clocks.h"
 #include "conf.h"
 #include "cmdmon.h"
 #include "keys.h"
@@ -176,11 +177,11 @@ MAI_CleanupAndExit(void)
   REF_Finalise();
   LDB_Finalise();
   RTC_Finalise();
-  SYS_Finalise();
 
   SCK_Finalise();
   SCH_Finalise();
   LCL_Finalise();
+  CLK_Finalise();
   PRV_Finalise();
 
   delete_pidfile();
@@ -665,6 +666,7 @@ int main
   write_pidfile();
 
   PRV_Initialise(scfilter_level);
+  CLK_Initialise(clock_control);
   LCL_Initialise();
   SCH_Initialise();
   SCK_Initialise(address_family);
@@ -672,7 +674,6 @@ int main
   /* Start helper processes if needed */
   NKS_PreInitialise(pw->pw_uid, pw->pw_gid, scfilter_level);
 
-  SYS_Initialise(clock_control);
   RTC_Initialise(do_init_rtc);
   SRC_Initialise();
   RCL_Initialise();

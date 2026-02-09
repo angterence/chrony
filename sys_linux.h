@@ -27,13 +27,14 @@
 #ifndef GOT_SYS_LINUX_H
 #define GOT_SYS_LINUX_H
 
+#include "clocks.h"
 #include "sys.h"
 
-extern void SYS_Linux_Initialise(void);
+extern void SYS_Linux_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock);
 
-extern void SYS_Linux_Finalise(void);
+extern void SYS_Linux_FinaliseClockDriver(struct clk_Driver *driver);
 
-extern void SYS_Linux_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context, int clock_control);
+extern void SYS_Linux_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context);
 
 extern void SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context);
 

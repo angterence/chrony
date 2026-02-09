@@ -30,9 +30,8 @@
 
 #include "sys_generic.h"
 
+#include "clocks_priv.h"
 #include "conf.h"
-#include "local.h"
-#include "localp.h"
 #include "logging.h"
 #include "privops.h"
 #include "sched.h"
@@ -41,13 +40,15 @@
 /* ================================================== */
 
 /* System clock drivers */
-static lcl_ReadFrequencyDriver drv_read_freq;
-static lcl_SetFrequencyDriver drv_set_freq;
-static lcl_SetSyncStatusDriver drv_set_sync_status;
-static lcl_AccrueOffsetDriver drv_accrue_offset;
-static lcl_OffsetCorrectionDriver drv_get_offset_correction;
-static lcl_ApplyStepOffsetDriver drv_apply_step_offset;
-static lcl_SetLeapDriver drv_set_leap;
+static CLK_Instance drv_clock;
+static clk_DriverContext *drv_context;
+static clk_ReadFrequency drv_read_freq;
+static clk_SetFrequency drv_set_freq;
+static clk_AccumulateOffset drv_accumulate_offset;
+static clk_GetOffset drv_get_offset;
+static clk_ApplyStepOffset drv_apply_step_offset;
+static clk_SetSyncStatus drv_set_sync_status;
+static clk_SetLeap drv_set_leap;
 
 /* Current frequency as requested by the local module (in ppm) */
 static double base_freq;
@@ -124,10 +125,10 @@ static void update_slew(void);
 static void
 start_fastslew(void)
 {
-  if (!drv_accrue_offset)
+  if (!drv_accumulate_offset)
     return;
 
-  drv_accrue_offset(offset_register, 0.0);
+  drv_accumulate_offset(drv_context, offset_register, 0.0);
 
   DEBUG_LOG("fastslew offset=%e", offset_register);
 
@@ -142,12 +143,12 @@ stop_fastslew(struct timespec *now)
 {
   double corr;
 
-  if (!drv_get_offset_correction || !fastslew_active)
+  if (!drv_get_offset || !fastslew_active)
     return;
 
   /* Cancel the remaining offset */
-  drv_get_offset_correction(now, &corr, NULL);
-  drv_accrue_offset(corr, 0.0);
+  drv_get_offset(drv_context, now, &corr, NULL);
+  drv_accumulate_offset(drv_context, corr, 0.0);
   offset_register -= corr;
 }
 
@@ -175,7 +176,7 @@ update_slew(void)
   /* Remove currently running timeout */
   SCH_RemoveTimeout(slew_timeout_id);
 
-  LCL_ReadRawTime(&now);
+  CLK_ReadTime(drv_clock, &now);
 
   /* Adjust the offset register by achieved slew */
   duration = UTI_DiffTimespecsToDouble(&now, &slew_start);
@@ -214,7 +215,7 @@ update_slew(void)
 
   /* Let the system driver perform the slew if the requested frequency
      offset is too large for the frequency driver */
-  if (drv_accrue_offset && fabs(corr_freq) >= fastslew_max_rate &&
+  if (drv_accumulate_offset && fabs(corr_freq) >= fastslew_max_rate &&
       fabs(offset_register) > fastslew_min_offset) {
     start_fastslew();
     corr_freq = 0.0;
@@ -225,10 +226,10 @@ update_slew(void)
 
   /* Set the new frequency (the actual frequency returned by the call may be
      slightly different from the requested frequency due to rounding) */
-  total_freq = (*drv_set_freq)(total_freq);
+  total_freq = drv_set_freq(drv_context, total_freq);
 
   /* Compute the new slewing frequency, it's relative to the real frequency to
-     make the calculation in offset_convert() cheaper */
+     make the calculation in get_offset() cheaper */
   old_slew_freq = slew_freq;
   slew_freq = (total_freq - base_freq) / (1.0e6 - total_freq);
 
@@ -236,7 +237,7 @@ update_slew(void)
      to all statistics held at higher levels in the system */
   slew_error = fabs((old_slew_freq - slew_freq) * max_freq_change_delay);
   if (slew_error >= MIN_OFFSET_CORRECTION)
-    LCL_InvokeDispersionNotifyHandlers(slew_error);
+    CLK_AddDispersion(drv_clock, slew_error);
 
   /* Compute the duration of the slew and clamp it.  If the slewing frequency
      is zero or has wrong sign (e.g. due to rounding in the frequency driver or
@@ -276,7 +277,7 @@ handle_end_of_slew(void *anything)
 /* ================================================== */
 
 static double
-read_frequency(void)
+read_frequency(clk_DriverContext *context)
 {
   return base_freq;
 }
@@ -284,7 +285,7 @@ read_frequency(void)
 /* ================================================== */
 
 static double
-set_frequency(double freq_ppm)
+set_frequency(clk_DriverContext *context, double freq_ppm)
 {
   base_freq = freq_ppm;
   update_slew();
@@ -295,7 +296,7 @@ set_frequency(double freq_ppm)
 /* ================================================== */
 
 static void
-accrue_offset(double offset, double corr_rate)
+accumulate_offset(clk_DriverContext *context, double offset, double corr_rate)
 {
   offset_register += offset;
   correction_rate = corr_rate;
@@ -307,15 +308,14 @@ accrue_offset(double offset, double corr_rate)
 /* Determine the correction to generate the cooked time for given raw time */
 
 static void
-offset_convert(struct timespec *raw,
-               double *corr, double *err)
+get_offset(clk_DriverContext *context, struct timespec *raw, double *corr, double *err)
 {
   double duration, fastslew_corr, fastslew_err;
 
   duration = UTI_DiffTimespecsToDouble(raw, &slew_start);
 
-  if (drv_get_offset_correction && fastslew_active) {
-    drv_get_offset_correction(raw, &fastslew_corr, &fastslew_err);
+  if (drv_get_offset && fastslew_active) {
+    drv_get_offset(drv_context, raw, &fastslew_corr, &fastslew_err);
     if (fastslew_corr == 0.0 && fastslew_err == 0.0)
       fastslew_active = 0;
   } else {
@@ -335,16 +335,16 @@ offset_convert(struct timespec *raw,
 /* Positive means currently fast of true time, i.e. jump backwards */
 
 static int
-apply_step_offset(double offset)
+apply_step_offset(clk_DriverContext *context, double offset)
 {
   struct timespec old_time, new_time;
   double err;
 
   if (drv_apply_step_offset) {
-    if (!drv_apply_step_offset(offset))
+    if (!drv_apply_step_offset(drv_context, offset))
       return 0;
   } else {
-    LCL_ReadRawTime(&old_time);
+    CLK_ReadTime(drv_clock, &old_time);
     UTI_AddDoubleToTimespec(&old_time, -offset, &new_time);
 
     if (PRV_SetTime(CLOCK_REALTIME, &new_time) < 0) {
@@ -352,10 +352,10 @@ apply_step_offset(double offset)
       return 0;
     }
 
-    LCL_ReadRawTime(&old_time);
+    CLK_ReadTime(drv_clock, &old_time);
     err = UTI_DiffTimespecsToDouble(&old_time, &new_time);
 
-    LCL_InvokeDispersionNotifyHandlers(fabs(err));
+    CLK_AddDispersion(drv_clock, fabs(err));
   }
 
   UTI_AddDoubleToTimespec(&slew_start, -offset, &slew_start);
@@ -366,16 +366,17 @@ apply_step_offset(double offset)
 /* ================================================== */
 
 static void
-set_leap(int leap, int tai_offset)
+set_leap(clk_DriverContext *context, int leap, int tai_offset)
 {
   if (drv_set_leap)
-    drv_set_leap(leap, tai_offset);
+    drv_set_leap(drv_context, leap, tai_offset);
 }
 
 /* ================================================== */
 
 static void
-set_sync_status(int synchronised, double est_error, double max_error)
+set_sync_status(clk_DriverContext *context, int synchronised,
+                double est_error, double max_error)
 {
   double offset;
 
@@ -385,33 +386,30 @@ set_sync_status(int synchronised, double est_error, double max_error)
   max_error += offset;
 
   if (drv_set_sync_status)
-    drv_set_sync_status(synchronised, est_error, max_error);
+    drv_set_sync_status(drv_context, synchronised, est_error, max_error);
 }
 
 /* ================================================== */
 
 void
-SYS_Generic_CompleteFreqDriver(double max_set_freq_ppm, double max_set_freq_delay,
-                               lcl_ReadFrequencyDriver sys_read_freq,
-                               lcl_SetFrequencyDriver sys_set_freq,
-                               lcl_ApplyStepOffsetDriver sys_apply_step_offset,
-                               double min_fastslew_offset, double max_fastslew_rate,
-                               lcl_AccrueOffsetDriver sys_accrue_offset,
-                               lcl_OffsetCorrectionDriver sys_get_offset_correction,
-                               lcl_SetLeapDriver sys_set_leap,
-                               lcl_SetSyncStatusDriver sys_set_sync_status)
+SYS_Generic_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock,
+                                  double max_set_freq_ppm, double max_set_freq_delay,
+                                  double min_fastslew_offset, double max_fastslew_rate)
 {
   max_freq = max_set_freq_ppm;
   max_freq_change_delay = max_set_freq_delay * (1.0 + max_freq / 1.0e6);
-  drv_read_freq = sys_read_freq;
-  drv_set_freq = sys_set_freq;
-  drv_accrue_offset = sys_accrue_offset;
-  drv_get_offset_correction = sys_get_offset_correction;
-  drv_set_leap = sys_set_leap;
-  drv_set_sync_status = sys_set_sync_status;
-  drv_apply_step_offset = sys_apply_step_offset;
 
-  base_freq = (*drv_read_freq)();
+  drv_clock = clock;
+  drv_context = driver->context;
+  drv_read_freq = driver->read_frequency;
+  drv_set_freq = driver->set_frequency;
+  drv_accumulate_offset = driver->accumulate_offset;
+  drv_get_offset = driver->get_offset;
+  drv_apply_step_offset = driver->apply_step_offset;
+  drv_set_leap = driver->set_leap;
+  drv_set_sync_status = driver->set_sync_status;
+
+  base_freq = drv_read_freq(drv_context);
   slew_freq = 0.0;
   offset_register = 0.0;
   slew_excess_duration = 0.0;
@@ -422,15 +420,19 @@ SYS_Generic_CompleteFreqDriver(double max_set_freq_ppm, double max_set_freq_dela
   fastslew_max_rate = max_fastslew_rate / 1.0e6;
   fastslew_active = 0;
 
-  lcl_RegisterSystemDrivers(read_frequency, set_frequency,
-                            accrue_offset, apply_step_offset,
-                            offset_convert, set_leap, set_sync_status);
+  driver->read_frequency = read_frequency;
+  driver->set_frequency = set_frequency;
+  driver->accumulate_offset = accumulate_offset;
+  driver->get_offset = get_offset;
+  driver->apply_step_offset = apply_step_offset;
+  driver->set_leap = set_leap;
+  driver->set_sync_status = set_sync_status;
 }
 
 /* ================================================== */
 
 void
-SYS_Generic_Finalise(void)
+SYS_Generic_FinaliseClockDriver(struct clk_Driver *driver)
 {
   struct timespec now;
 
@@ -440,10 +442,22 @@ SYS_Generic_Finalise(void)
   SCH_RemoveTimeout(slew_timeout_id);
   slew_timeout_id = 0;
 
-  (*drv_set_freq)(clamp_freq(base_freq));
+  drv_set_freq(drv_context, clamp_freq(base_freq));
 
-  LCL_ReadRawTime(&now);
+  CLK_ReadTime(drv_clock, &now);
   stop_fastslew(&now);
+
+  /* Allow the lower driver to finalise with its original contexts */
+  driver->context = drv_context;
+  driver->read_frequency = drv_read_freq;
+  driver->set_frequency = drv_set_freq;
+  driver->accumulate_offset = drv_accumulate_offset;
+  driver->get_offset = drv_get_offset;
+  driver->apply_step_offset = drv_apply_step_offset;
+  driver->set_leap = drv_set_leap;
+  driver->set_sync_status = drv_set_sync_status;
+
+  drv_clock = NULL;
 }
 
 /* ================================================== */

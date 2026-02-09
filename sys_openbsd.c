@@ -36,6 +36,7 @@
 
 #include "sys_generic.h"
 #include "sys_openbsd.h"
+#include "clocks_priv.h"
 #include "conf.h"
 #include "local.h"
 #include "logging.h"
@@ -55,10 +56,12 @@
 static struct timespec last_rtc_sync;
 #define RTC_SYNC_INTERVAL (60 * 60.0)
 
+static CLK_Instance drv_clock;
+
 /* ================================================== */
 
 static double
-read_frequency(void)
+read_frequency(clk_DriverContext *context)
 {
   int64_t freq;
 
@@ -71,7 +74,7 @@ read_frequency(void)
 /* ================================================== */
 
 static double
-set_frequency(double freq_ppm)
+set_frequency(clk_DriverContext *context, double freq_ppm)
 {
   int64_t freq;
 
@@ -100,13 +103,13 @@ synchronise_rtc(void)
   LCL_ReadRawTime(&new_ts);
   err = UTI_DiffTimespecsToDouble(&new_ts, &ts);
 
-  lcl_InvokeDispersionNotifyHandlers(fabs(err));
+  CLK_AddDispersion(drv_clock, fabs(err));
 }
 
 /* ================================================== */
 
 static void
-set_sync_status(int synchronised, double est_error, double max_error)
+set_sync_status(clk_DriverContext *context, int synchronised, double est_error, double max_error)
 {
   double rtc_sync_elapsed;
   struct timespec now;
@@ -181,35 +184,42 @@ clock_settime(clockid_t clock, const struct timespec *now)
 /* ================================================== */
 
 void
-SYS_OpenBSD_Initialise(void)
+SYS_OpenBSD_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
   struct clockinfo cinfo;
+
+  if (CLK_GetId(clock) != CLOCK_REALTIME)
+    LOG_FATAL("Unsupported clock");
 
   cinfo = get_clockinfo();
   reset_adjtime_offset();
 
   UTI_ZeroTimespec(&last_rtc_sync);
 
-  SYS_Generic_CompleteFreqDriver(MAX_FREQ, 1.0 / cinfo.hz,
-                                 read_frequency, set_frequency, NULL,
-                                 0.0, 0.0,
-                                 NULL, NULL,
-                                 NULL, set_sync_status);
+  driver->read_frequency = read_frequency;
+  driver->set_frequency = set_frequency;
+  driver->set_sync_status = set_sync_status;
+
+  drv_clock = clock;
+
+  SYS_Generic_InitialiseClockDriver(driver, clock, MAX_FREQ, 1.0 / cinfo.hz, 0.0, 0.0);
 }
 
 /* ================================================== */
 
 void
-SYS_OpenBSD_Finalise(void)
+SYS_OpenBSD_FinaliseClockDriver(struct clk_Driver *driver)
 {
-  SYS_Generic_Finalise();
+  SYS_Generic_FinaliseClockDriver(driver);
+
+  drv_clock = NULL;
 }
 
 /* ================================================== */
 
 #ifdef FEAT_PRIVDROP
 void
-SYS_OpenBSD_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context, int clock_control)
+SYS_OpenBSD_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context)
 {
   if (context == SYS_MAIN_PROCESS)
     PRV_StartHelper();

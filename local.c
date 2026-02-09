@@ -33,8 +33,8 @@
 #include "sysincl.h"
 
 #include "conf.h"
+#include "clocks.h"
 #include "local.h"
-#include "localp.h"
 #include "memory.h"
 #include "smooth.h"
 #include "util.h"
@@ -52,15 +52,8 @@ static double max_freq_ppm;
 static double temp_comp_ppm;
 
 /* ================================================== */
-/* Store the system dependent drivers */
 
-static lcl_ReadFrequencyDriver drv_read_freq;
-static lcl_SetFrequencyDriver drv_set_freq;
-static lcl_AccrueOffsetDriver drv_accrue_offset;
-static lcl_ApplyStepOffsetDriver drv_apply_step_offset;
-static lcl_OffsetCorrectionDriver drv_offset_convert;
-static lcl_SetLeapDriver drv_set_leap;
-static lcl_SetSyncStatusDriver drv_set_sync_status;
+static CLK_Instance local_clock;
 
 /* ================================================== */
 
@@ -300,17 +293,15 @@ LCL_Initialise(void)
 
   dispersion_notify_list.next = dispersion_notify_list.prev = &dispersion_notify_list;
 
-  /* Null out the system drivers, so that we die
-     if they never get defined before use */
-  
-  drv_read_freq = NULL;
-  drv_set_freq = NULL;
-  drv_accrue_offset = NULL;
-  drv_offset_convert = NULL;
-
   /* This ought to be set from the system driver layer */
   current_freq_ppm = 0.0;
   temp_comp_ppm = 0.0;
+
+  local_clock = CLK_GetMainClock();
+
+  current_freq_ppm = CLK_GetFrequency(local_clock);
+
+  DEBUG_LOG("Local freq=%.3fppm", current_freq_ppm);
 
   precision_quantum = CNF_GetClockPrecision();
   if (precision_quantum <= 0.0)
@@ -339,6 +330,8 @@ LCL_Finalise(void)
   /* Make sure all handlers have been removed */
   BRIEF_ASSERT(change_list.next == &change_list);
   BRIEF_ASSERT(dispersion_notify_list.next == &dispersion_notify_list);
+
+  local_clock = NULL;
 }
 
 /* ================================================== */
@@ -517,11 +510,18 @@ void LCL_RemoveDispersionNotifyHandler(LCL_DispersionNotifyHandler handler, void
 
 /* ================================================== */
 
+CLK_Instance
+LCL_GetLocalClock(void)
+{
+  return local_clock;
+}
+
+/* ================================================== */
+
 void
 LCL_ReadRawTime(struct timespec *ts)
 {
-  if (clock_gettime(CLOCK_REALTIME, ts) < 0)
-    LOG_FATAL("clock_gettime() failed : %s", strerror(errno));
+  CLK_ReadTime(local_clock, ts);
 }
 
 /* ================================================== */
@@ -552,7 +552,7 @@ void
 LCL_GetOffsetCorrection(struct timespec *raw, double *correction, double *err)
 {
   /* Call system specific driver to get correction */
-  (*drv_offset_convert)(raw, correction, err);
+  CLK_GetOffset(local_clock, raw, correction, err);
 }
 
 /* ================================================== */
@@ -619,9 +619,7 @@ LCL_SetAbsoluteFrequency(double afreq_ppm)
 
   /* Call the system-specific driver for setting the frequency */
   
-  afreq_ppm = (*drv_set_freq)(afreq_ppm);
-
-  dfreq = (afreq_ppm - current_freq_ppm) / (1.0e6 - current_freq_ppm);
+  dfreq = CLK_SetFrequency(local_clock, afreq_ppm);
 
   LCL_ReadRawTime(&raw);
   LCL_CookTime(&raw, &cooked, NULL);
@@ -629,8 +627,7 @@ LCL_SetAbsoluteFrequency(double afreq_ppm)
   /* Dispatch to all handlers */
   invoke_parameter_change_handlers(&raw, &cooked, dfreq, 0.0, LCL_ChangeAdjust);
 
-  current_freq_ppm = afreq_ppm;
-
+  current_freq_ppm = CLK_GetFrequency(local_clock);
 }
 
 /* ================================================== */
@@ -665,7 +662,7 @@ LCL_ApplyStepOffset(double offset)
   if (!check_offset(&raw, offset))
       return 0;
 
-  if (!(*drv_apply_step_offset)(offset)) {
+  if (!CLK_ApplyStepOffset(local_clock, offset)) {
     LOG(LOGS_ERR, "Could not step system clock");
     return 0;
   }
@@ -716,7 +713,6 @@ int
 LCL_AccumulateFrequencyAndOffset(double dfreq, double doffset, double corr_rate)
 {
   struct timespec raw, cooked;
-  double old_freq_ppm;
 
   LCL_ReadRawTime(&raw);
   /* Due to modifying the offset, this has to be the cooked time prior
@@ -726,23 +722,9 @@ LCL_AccumulateFrequencyAndOffset(double dfreq, double doffset, double corr_rate)
   if (!check_offset(&cooked, doffset))
     return 0;
 
-  old_freq_ppm = current_freq_ppm;
-
-  /* Work out new absolute frequency.  Note that absolute frequencies
-   are handled in units of ppm, whereas the 'dfreq' argument is in
-   terms of the gradient of the (offset) v (local time) function. */
-  current_freq_ppm += dfreq * (1.0e6 - current_freq_ppm);
-
-  current_freq_ppm = clamp_freq(current_freq_ppm);
-
-  DEBUG_LOG("old_freq=%.3fppm new_freq=%.3fppm offset=%.6fsec",
-      old_freq_ppm, current_freq_ppm, doffset);
-
   /* Call the system-specific driver for setting the frequency */
-  current_freq_ppm = (*drv_set_freq)(current_freq_ppm);
-  dfreq = (current_freq_ppm - old_freq_ppm) / (1.0e6 - old_freq_ppm);
-
-  (*drv_accrue_offset)(doffset, corr_rate);
+  dfreq = CLK_AccumulateFrequencyAndOffset(local_clock, dfreq, doffset, corr_rate);
+  current_freq_ppm = CLK_GetFrequency(local_clock);
 
   /* Dispatch to all handlers */
   invoke_parameter_change_handlers(&raw, &cooked, dfreq, doffset, LCL_ChangeAdjust);
@@ -779,30 +761,6 @@ LCL_InvokeDispersionNotifyHandlers(double dispersion)
     (ptr->handler)(dispersion, ptr->anything);
   }
 
-}
-
-/* ================================================== */
-
-void
-lcl_RegisterSystemDrivers(lcl_ReadFrequencyDriver read_freq,
-                          lcl_SetFrequencyDriver set_freq,
-                          lcl_AccrueOffsetDriver accrue_offset,
-                          lcl_ApplyStepOffsetDriver apply_step_offset,
-                          lcl_OffsetCorrectionDriver offset_convert,
-                          lcl_SetLeapDriver set_leap,
-                          lcl_SetSyncStatusDriver set_sync_status)
-{
-  drv_read_freq = read_freq;
-  drv_set_freq = set_freq;
-  drv_accrue_offset = accrue_offset;
-  drv_apply_step_offset = apply_step_offset;
-  drv_offset_convert = offset_convert;
-  drv_set_leap = set_leap;
-  drv_set_sync_status = set_sync_status;
-
-  current_freq_ppm = (*drv_read_freq)();
-
-  DEBUG_LOG("Local freq=%.3fppm", current_freq_ppm);
 }
 
 /* ================================================== */
@@ -852,7 +810,7 @@ LCL_CancelOffsetCorrection(void)
 int
 LCL_CanSystemLeap(void)
 {
-  return drv_set_leap ? 1 : 0;
+  return CLK_CanLeap(local_clock);
 }
 
 /* ================================================== */
@@ -860,9 +818,7 @@ LCL_CanSystemLeap(void)
 void
 LCL_SetSystemLeap(int leap, int tai_offset)
 {
-  if (drv_set_leap) {
-    (drv_set_leap)(leap, tai_offset);
-  }
+  CLK_SetLeap(local_clock, leap, tai_offset);
 }
 
 /* ================================================== */
@@ -885,7 +841,8 @@ LCL_SetTempComp(double comp)
   current_freq_ppm = current_freq_ppm * (1.0 - 1.0e-6 * comp) - comp;
 
   /* Call the system-specific driver for setting the frequency */
-  current_freq_ppm = (*drv_set_freq)(current_freq_ppm);
+  CLK_SetFrequency(local_clock, current_freq_ppm);
+  current_freq_ppm = CLK_GetFrequency(local_clock);
 
   temp_comp_ppm = (uncomp_freq_ppm - current_freq_ppm) /
     (1.0e-6 * uncomp_freq_ppm + 1.0);
@@ -898,9 +855,7 @@ LCL_SetTempComp(double comp)
 void
 LCL_SetSyncStatus(int synchronised, double est_error, double max_error)
 {
-  if (drv_set_sync_status) {
-    (drv_set_sync_status)(synchronised, est_error, max_error);
-  }
+  CLK_SetSyncStatus(local_clock, synchronised, est_error, max_error);
 }
 
 /* ================================================== */

@@ -29,6 +29,7 @@
 
 #include "sysincl.h"
 
+#include "clocks_priv.h"
 #include "conf.h"
 #include "privops.h"
 #include "sys_generic.h"
@@ -81,7 +82,7 @@ convert_timex_frequency(const struct timex *txc)
 /* ================================================== */
 
 static double
-read_frequency(void)
+read_frequency(clk_DriverContext *context)
 {
   struct timex txc;
 
@@ -95,7 +96,7 @@ read_frequency(void)
 /* ================================================== */
 
 static double
-set_frequency(double freq_ppm)
+set_frequency(clk_DriverContext *context, double freq_ppm)
 {
   struct timex txc;
 
@@ -110,7 +111,7 @@ set_frequency(double freq_ppm)
 /* ================================================== */
 
 static void
-set_leap(int leap, int tai_offset)
+set_leap(clk_DriverContext *context, int leap, int tai_offset)
 {
   struct timex txc;
   int applied, prev_status;
@@ -156,7 +157,8 @@ set_leap(int leap, int tai_offset)
 /* ================================================== */
 
 static void
-set_sync_status(int synchronised, double est_error, double max_error)
+set_sync_status(clk_DriverContext *context, int synchronised, double est_error,
+                double max_error)
 {
   struct timex txc;
 
@@ -223,40 +225,32 @@ initialise_timex(void)
 /* ================================================== */
 
 void
-SYS_Timex_Initialise(void)
+SYS_Timex_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock,
+                                double max_set_freq_ppm, double max_set_freq_delay,
+                                double min_fastslew_offset, double max_fastslew_rate)
 {
-  SYS_Timex_InitialiseWithFunctions(MAX_FREQ, 1.0 / MIN_TICK_RATE, NULL, NULL, NULL,
-                                    0.0, 0.0, NULL, NULL);
-}
+  if (CLK_GetId(clock) != CLOCK_REALTIME)
+    LOG_FATAL("Unsupported clock");
 
-/* ================================================== */
-
-void
-SYS_Timex_InitialiseWithFunctions(double max_set_freq_ppm, double max_set_freq_delay,
-                                  lcl_ReadFrequencyDriver sys_read_freq,
-                                  lcl_SetFrequencyDriver sys_set_freq,
-                                  lcl_ApplyStepOffsetDriver sys_apply_step_offset,
-                                  double min_fastslew_offset, double max_fastslew_rate,
-                                  lcl_AccrueOffsetDriver sys_accrue_offset,
-                                  lcl_OffsetCorrectionDriver sys_get_offset_correction)
-{
   initialise_timex();
 
-  SYS_Generic_CompleteFreqDriver(max_set_freq_ppm, max_set_freq_delay,
-                                 sys_read_freq ? sys_read_freq : read_frequency,
-                                 sys_set_freq ? sys_set_freq : set_frequency,
-                                 sys_apply_step_offset,
-                                 min_fastslew_offset, max_fastslew_rate,
-                                 sys_accrue_offset, sys_get_offset_correction,
-                                 set_leap, set_sync_status);
+  if (!driver->read_frequency)
+    driver->read_frequency = read_frequency;
+  if (!driver->set_frequency)
+    driver->set_frequency = set_frequency;
+  driver->set_leap = set_leap;
+  driver->set_sync_status = set_sync_status;
+
+  SYS_Generic_InitialiseClockDriver(driver, clock, max_set_freq_ppm, max_set_freq_delay,
+                                    min_fastslew_offset, max_fastslew_rate);
 }
 
 /* ================================================== */
 
 void
-SYS_Timex_Finalise(void)
+SYS_Timex_FinaliseClockDriver(struct clk_Driver *driver)
 {
-  SYS_Generic_Finalise();
+  SYS_Generic_FinaliseClockDriver(driver);
 }
 
 /* ================================================== */

@@ -31,6 +31,10 @@
 
 #include "sysincl.h"
 
+#include "clocks.h"
+
+extern CLK_Instance LCL_GetLocalClock(void);
+
 /* Read the system clock */
 extern void LCL_ReadRawTime(struct timespec *ts);
 

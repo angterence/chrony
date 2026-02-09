@@ -30,6 +30,7 @@
 
 #include "sysincl.h"
 
+#include "clocks_priv.h"
 #include "sys_netbsd.h"
 #include "sys_timex.h"
 #include "logging.h"
@@ -57,7 +58,7 @@
    slew backwards */
 
 static void
-accrue_offset(double offset, double corr_rate)
+accumulate_offset(clk_DriverContext *context, double offset, double corr_rate)
 {
   struct timeval newadj, oldadj;
   double doldadj;
@@ -79,8 +80,7 @@ accrue_offset(double offset, double corr_rate)
 /* ================================================== */
 
 static void
-get_offset_correction(struct timespec *raw,
-                      double *corr, double *err)
+get_offset(clk_DriverContext *context, struct timespec *raw, double *corr, double *err)
 {
   struct timeval remadj;
   double adjustment_remaining;
@@ -111,27 +111,31 @@ get_offset_correction(struct timespec *raw,
 /* ================================================== */
 
 void
-SYS_NetBSD_Initialise(void)
+SYS_NetBSD_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
-  SYS_Timex_InitialiseWithFunctions(MAX_FREQ, 1.0 / MIN_TICK_RATE,
-                                    NULL, NULL, NULL,
-                                    MIN_FASTSLEW_OFFSET, MAX_ADJTIME_SLEWRATE,
-                                    accrue_offset, get_offset_correction);
+  if (CLK_GetId(clock) != CLOCK_REALTIME)
+    LOG_FATAL("Unsupported clock");
+
+  driver->accumulate_offset = accumulate_offset;
+  driver->get_offset = get_offset;
+
+  SYS_Timex_InitialiseClockDriver(driver, clock, MAX_FREQ, 1.0 / MIN_TICK_RATE,
+                                  MIN_FASTSLEW_OFFSET, MAX_ADJTIME_SLEWRATE);
 }
 
 /* ================================================== */
 
 void
-SYS_NetBSD_Finalise(void)
+SYS_NetBSD_FinaliseClockDriver(struct clk_Driver *driver)
 {
-  SYS_Timex_Finalise();
+  SYS_Timex_FinaliseClockDriver(driver);
 }
 
 /* ================================================== */
 
 #ifdef FEAT_PRIVDROP
 void
-SYS_NetBSD_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context, int clock_control)
+SYS_NetBSD_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context)
 {
 #ifdef NETBSD
   int fd;
@@ -145,7 +149,7 @@ SYS_NetBSD_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context, int clock_
   UTI_DropRoot(uid, gid);
 
 #ifdef NETBSD
-  if (!clock_control)
+  if (!CLK_IsAnyControlled())
     return;
 
   /* Check if we have write access to /dev/clockctl */

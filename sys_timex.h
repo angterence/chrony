@@ -27,20 +27,16 @@
 #ifndef GOT_SYS_TIMEX_H
 #define GOT_SYS_TIMEX_H
 
-#include "localp.h"
+#include "clocks.h"
 
 extern void SYS_Timex_Initialise(void);
 
 /* Initialise with some driver functions replaced with special versions */
-extern void SYS_Timex_InitialiseWithFunctions(double max_set_freq_ppm, double max_set_freq_delay,
-                                              lcl_ReadFrequencyDriver sys_read_freq,
-                                              lcl_SetFrequencyDriver sys_set_freq,
-                                              lcl_ApplyStepOffsetDriver sys_apply_step_offset,
-                                              double min_fastslew_offset, double max_fastslew_rate,
-                                              lcl_AccrueOffsetDriver sys_accrue_offset,
-                                              lcl_OffsetCorrectionDriver sys_get_offset_correction);
+extern void SYS_Timex_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock,
+                                            double max_set_freq_ppm, double max_set_freq_delay,
+                                            double min_fastslew_offset, double max_fastslew_rate);
 
-extern void SYS_Timex_Finalise(void);
+extern void SYS_Timex_FinaliseClockDriver(struct clk_Driver *driver);
 
 /* Wrapper for adjtimex()/ntp_adjtime() */
 extern int SYS_Timex_Adjust(struct timex *txc, int ignore_error);

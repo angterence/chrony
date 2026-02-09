@@ -29,11 +29,14 @@
 #ifndef GOT_SYS_H
 #define GOT_SYS_H
 
+#include "clocks.h"
+
 /* Called at the start of the run to do initialisation */
-extern void SYS_Initialise(int clock_control);
+extern void SYS_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock,
+                                      int control);
 
 /* Called at the end of the run to do final clean-up */
-extern void SYS_Finalise(void);
+extern void SYS_FinaliseClockDriver(struct clk_Driver *driver, int control);
 
 typedef enum {
   SYS_MAIN_PROCESS,

@@ -716,7 +716,6 @@ run_helper(uid_t uid, gid_t gid, int scfilter_level, int sock_fd)
   log_severity = LOG_GetMinSeverity();
   LOG_SetMinSeverity(LOGS_ERR);
 
-  SYS_Initialise(0);
   LOG_SetMinSeverity(log_severity);
 
   if (!geteuid() && (uid || gid))
@@ -739,7 +738,6 @@ run_helper(uid_t uid, gid_t gid, int scfilter_level, int sock_fd)
 
   NKS_Finalise();
   SCK_Finalise();
-  SYS_Finalise();
   SCH_Finalise();
   LCL_Finalise();
   PRV_Finalise();

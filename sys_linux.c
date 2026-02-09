@@ -65,6 +65,7 @@
 #include "sys_linux.h"
 #include "sys_linux_scmp.h"
 #include "sys_timex.h"
+#include "clocks_priv.h"
 #include "conf.h"
 #include "local.h"
 #include "logging.h"
@@ -101,7 +102,7 @@ static int tick_update_hz;
 /* Positive means currently fast of true time, i.e. jump backwards */
 
 static int
-apply_step_offset(double offset)
+apply_step_offset(clk_DriverContext *context, double offset)
 {
   struct timex txc;
 
@@ -127,7 +128,7 @@ apply_step_offset(double offset)
    clock runs fast when uncompensated.  */
 
 static double
-set_frequency(double freq_ppm)
+set_frequency(clk_DriverContext *context, double freq_ppm)
 {
   struct timex txc;
   long required_tick;
@@ -151,7 +152,7 @@ set_frequency(double freq_ppm)
 /* Read the ppm frequency from the kernel */
 
 static double
-read_frequency(void)
+read_frequency(clk_DriverContext *context)
 {
   struct timex txc;
 
@@ -306,33 +307,34 @@ report_time_adjust_blockers(void)
 /* Initialisation code for this module */
 
 void
-SYS_Linux_Initialise(void)
+SYS_Linux_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
   get_version_specific_details();
 
   report_time_adjust_blockers();
 
-  SYS_Timex_InitialiseWithFunctions(1.0e6 * max_tick_bias / nominal_tick,
-                                    1.0 / tick_update_hz,
-                                    read_frequency, set_frequency,
-                                    apply_step_offset,
-                                    0.0, 0.0, NULL, NULL);
+  driver->read_frequency = read_frequency;
+  driver->set_frequency = set_frequency;
+  driver->apply_step_offset = apply_step_offset;
+
+  SYS_Timex_InitialiseClockDriver(driver, clock, 1.0e6 * max_tick_bias / nominal_tick,
+                                  1.0 / tick_update_hz, 0.0, 0.0);
 }
 
 /* ================================================== */
 /* Finalisation code for this module */
 
 void
-SYS_Linux_Finalise(void)
+SYS_Linux_FinaliseClockDriver(struct clk_Driver *driver)
 {
-  SYS_Timex_Finalise();
+  SYS_Timex_FinaliseClockDriver(driver);
 }
 
 /* ================================================== */
 
 #ifdef FEAT_PRIVDROP
 void
-SYS_Linux_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context, int clock_control)
+SYS_Linux_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context)
 {
   char cap_text[256];
   cap_t cap;
@@ -353,7 +355,7 @@ SYS_Linux_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context, int clock_c
                  "cap_net_bind_service=ep" : "",
                (CNF_GetBindNtpInterface() || CNF_GetBindAcquisitionInterface()) &&
                  !SYS_Linux_CheckKernelVersion(5, 7) ? "cap_net_raw=ep" : "",
-               clock_control ? "cap_sys_time=ep" : "") >= sizeof (cap_text))
+               CLK_IsAnyControlled() ? "cap_sys_time=ep" : "") >= sizeof (cap_text))
     assert(0);
 
   /* Helpers don't need any capabilities */

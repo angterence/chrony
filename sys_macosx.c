@@ -38,9 +38,9 @@
 #include <pthread.h>
 
 #include "sys_macosx.h"
+#include "clocks_priv.h"
 #include "conf.h"
 #include "local.h"
-#include "localp.h"
 #include "logging.h"
 #include "sched.h"
 #include "privops.h"
@@ -224,7 +224,7 @@ stop_adjust(void)
    slew backwards */
 
 static void
-accrue_offset(double offset, double corr_rate)
+accumulate_offset(clk_DriverContext *context, double offset, double corr_rate)
 {
   stop_adjust();
   offset_register += offset;
@@ -237,7 +237,7 @@ accrue_offset(double offset, double corr_rate)
    step backwards */
 
 static int
-apply_step_offset(double offset)
+apply_step_offset(clk_DriverContext *context, double offset)
 {
   struct timespec old_time, new_time, T1;
 
@@ -263,7 +263,7 @@ apply_step_offset(double offset)
 /* ================================================== */
 
 static double
-set_frequency(double new_freq_ppm)
+set_frequency(clk_DriverContext *context, double new_freq_ppm)
 {
   stop_adjust();
   current_freq = new_freq_ppm * 1.0e-6;
@@ -278,7 +278,7 @@ set_frequency(double new_freq_ppm)
 /* ================================================== */
 
 static double
-read_frequency(void)
+read_frequency(clk_DriverContext *context)
 {
   return current_freq * 1.0e6;
 }
@@ -286,8 +286,7 @@ read_frequency(void)
 /* ================================================== */
 
 static void
-get_offset_correction(struct timespec *raw,
-                      double *corr, double *err)
+get_offset(clk_DriverContext *context, struct timespec *raw, double *corr, double *err)
 {
   stop_adjust();
   *corr = -offset_register;
@@ -310,7 +309,7 @@ static SCH_TimeoutID drift_removal_id;
  they correct for drift build-up), but any program on this machine
  that reads the system time will be given an erroneous value, the
  degree of error depending on how long it is since
- get_offset_correction was last called. */
+ get_offset was last called. */
 
 static void
 drift_removal_timeout(SCH_ArbitraryArgument not_used)
@@ -333,7 +332,7 @@ drift_removal_timeout(SCH_ArbitraryArgument not_used)
    update the RTC */
 
 static void
-set_sync_status(int synchronised, double est_error, double max_error)
+set_sync_status(clk_DriverContext *context, int synchronised, double est_error, double max_error)
 {
   double interval;
 
@@ -348,7 +347,7 @@ set_sync_status(int synchronised, double est_error, double max_error)
       rtc_sync_elapsed = UTI_DiffTimespecsToDouble(&now, &last_rtc_sync);
       if (fabs(rtc_sync_elapsed) >= RTC_SYNC_INTERVAL) {
         /* update the RTC by applying a step of 0.0 secs */
-        apply_step_offset(0.0);
+        apply_step_offset(context, 0.0);
         last_rtc_sync = now;
         DEBUG_LOG("rtc synchronised");
       }
@@ -432,16 +431,19 @@ void SYS_MacOSX_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context)
 /* ================================================== */
 
 static void
-legacy_MacOSX_Initialise(void)
+legacy_MacOSX_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
+  if (CLK_GetId(clock) != CLOCK_REALTIME)
+    LOG_FATAL("Unsupported clock");
+
   clock_initialise();
 
-  lcl_RegisterSystemDrivers(read_frequency, set_frequency,
-                            accrue_offset, apply_step_offset,
-                            get_offset_correction,
-                            NULL /* set_leap */,
-                            set_sync_status);
-
+  driver->read_frequency = read_frequency;
+  driver->set_frequency = set_frequency;
+  driver->accumulate_offset = accumulate_offset;
+  driver->get_offset = get_offset;
+  driver->apply_step_offset = apply_step_offset;
+  driver->set_sync_status = set_sync_status;
 
   drift_removal_id = 0;
 }
@@ -449,7 +451,7 @@ legacy_MacOSX_Initialise(void)
 /* ================================================== */
 
 static void
-legacy_MacOSX_Finalise(void)
+legacy_MacOSX_FinaliseClockDriver(struct clk_Driver *driver)
 {
   SCH_RemoveTimeout(drift_removal_id);
 
@@ -459,30 +461,30 @@ legacy_MacOSX_Finalise(void)
 /* ================================================== */
 
 void
-SYS_MacOSX_Initialise(void)
+SYS_MacOSX_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
 #ifdef HAVE_MACOS_SYS_TIMEX
   have_ntp_adjtime = (dlsym(RTLD_NEXT, "ntp_adjtime") != NULL);
   if (have_ntp_adjtime) {
-    SYS_NetBSD_Initialise();
+    SYS_NetBSD_Initialise(driver, clock);
     return;
   }
 #endif
-  legacy_MacOSX_Initialise();
+  legacy_MacOSX_InitialiseClockDriver(driver, clock);
 }
 
 /* ================================================== */
 
 void
-SYS_MacOSX_Finalise(void)
+SYS_MacOSX_FinaliseClockDriver(struct clk_Driver *driver)
 {
 #ifdef HAVE_MACOS_SYS_TIMEX
   if (have_ntp_adjtime) {
-    SYS_NetBSD_Finalise();
+    SYS_NetBSD_FinaliseClockDriver(driver);
     return;
   }
 #endif
-  legacy_MacOSX_Finalise();
+  legacy_MacOSX_FinaliseClockDriver(driver);
 }
 
 #endif

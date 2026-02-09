@@ -27,8 +27,10 @@
 #ifndef GOT_SYS_NULL_H
 #define GOT_SYS_NULL_H
 
-extern void SYS_Null_Initialise(void);
+#include "clocks.h"
 
-extern void SYS_Null_Finalise(void);
+extern void SYS_Null_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock);
+
+extern void SYS_Null_FinaliseClockDriver(struct clk_Driver *driver);
 
 #endif

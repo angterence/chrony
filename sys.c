@@ -50,55 +50,50 @@
 
 /* ================================================== */
 
-static int null_driver;
-
-/* ================================================== */
-
 void
-SYS_Initialise(int clock_control)
+SYS_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock, int control)
 {
-  null_driver = !clock_control;
-  if (null_driver) {
-    SYS_Null_Initialise();
-    return;
-  }
+  if (control) {
 #if defined(LINUX)
-  SYS_Linux_Initialise();
+    SYS_Linux_InitialiseClockDriver(driver, clock);
 #elif defined(SOLARIS)
-  SYS_Solaris_Initialise();
+    SYS_Solaris_InitialiseClockDriver(driver, clock);
 #elif defined(NETBSD) || defined(FREEBSD)
-  SYS_NetBSD_Initialise();
+    SYS_NetBSD_InitialiseClockDriver(driver, clock);
 #elif defined(OPENBSD)
-  SYS_OpenBSD_Initialise();
+    SYS_OpenBSD_InitialiseClockDriver(driver, clock);
 #elif defined(MACOSX)
-  SYS_MacOSX_Initialise();
+    SYS_MacOSX_InitialiseClockDriver(driver, clock);
 #else
 #error Unknown system
 #endif
+  } else {
+    SYS_Null_InitialiseClockDriver(driver, clock);
+  }
 }
 
 /* ================================================== */
 
 void
-SYS_Finalise(void)
+SYS_FinaliseClockDriver(struct clk_Driver *driver, int control)
 {
-  if (null_driver) {
-    SYS_Null_Finalise();
-    return;
-  }
+  if (control) {
 #if defined(LINUX)
-  SYS_Linux_Finalise();
+    SYS_Linux_FinaliseClockDriver(driver);
 #elif defined(SOLARIS)
-  SYS_Solaris_Finalise();
+    SYS_Solaris_FinaliseClockDriver(driver);
 #elif defined(NETBSD) || defined(FREEBSD)
-  SYS_NetBSD_Finalise();
+    SYS_NetBSD_FinaliseClockDriver(driver);
 #elif defined(OPENBSD)
-  SYS_OpenBSD_Finalise();
+    SYS_OpenBSD_FinaliseClockDriver(driver);
 #elif defined(MACOSX)
-  SYS_MacOSX_Finalise();
+    SYS_MacOSX_FinaliseClockDriver(driver);
 #else
 #error Unknown system
 #endif
+  } else {
+    SYS_Null_FinaliseClockDriver(driver);
+  }
 }
 
 /* ================================================== */
@@ -106,13 +101,13 @@ SYS_Finalise(void)
 void SYS_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context)
 {
 #if defined(LINUX) && defined (FEAT_PRIVDROP)
-  SYS_Linux_DropRoot(uid, gid, context, !null_driver);
+  SYS_Linux_DropRoot(uid, gid, context);
 #elif defined(SOLARIS) && defined(FEAT_PRIVDROP)
   SYS_Solaris_DropRoot(uid, gid, context);
 #elif (defined(NETBSD) || defined(FREEBSD)) && defined(FEAT_PRIVDROP)
-  SYS_NetBSD_DropRoot(uid, gid, context, !null_driver);
+  SYS_NetBSD_DropRoot(uid, gid, context);
 #elif defined(OPENBSD) && defined(FEAT_PRIVDROP)
-  SYS_OpenBSD_DropRoot(uid, gid, context, !null_driver);
+  SYS_OpenBSD_DropRoot(uid, gid, context);
 #elif defined(MACOSX) && defined(FEAT_PRIVDROP)
   SYS_MacOSX_DropRoot(uid, gid, context);
 #else

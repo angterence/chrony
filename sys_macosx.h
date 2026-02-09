@@ -30,11 +30,12 @@
 #ifndef GOT_SYS_MACOSX_H
 #define GOT_SYS_MACOSX_H
 
+#include "clocks.h"
 #include "sys.h"
 
 void SYS_MacOSX_SetScheduler(int SchedPriority);
 void SYS_MacOSX_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context);
-void SYS_MacOSX_Initialise(void);
-void SYS_MacOSX_Finalise(void);
+void SYS_MacOSX_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock);
+void SYS_MacOSX_FinaliseClockDriver(struct clk_Driver *driver);
 
 #endif

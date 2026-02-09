@@ -30,8 +30,8 @@
 
 #include "sys_null.h"
 
+#include "clocks_priv.h"
 #include "local.h"
-#include "localp.h"
 #include "logging.h"
 #include "util.h"
 
@@ -66,7 +66,7 @@ update_offset(void)
 /* ================================================== */
 
 static double
-read_frequency(void)
+read_frequency(clk_DriverContext *context)
 {
   return freq;
 }
@@ -74,7 +74,7 @@ read_frequency(void)
 /* ================================================== */
 
 static double
-set_frequency(double freq_ppm)
+set_frequency(clk_DriverContext *context, double freq_ppm)
 {
   update_offset();
   freq = freq_ppm;
@@ -85,7 +85,7 @@ set_frequency(double freq_ppm)
 /* ================================================== */
 
 static void
-accrue_offset(double offset, double corr_rate)
+accumulate_offset(clk_DriverContext *context, double offset, double corr_rate)
 {
   offset_register += offset;
 }
@@ -93,7 +93,7 @@ accrue_offset(double offset, double corr_rate)
 /* ================================================== */
 
 static int
-apply_step_offset(double offset)
+apply_step_offset(clk_DriverContext *context, double offset)
 {
   return 0;
 }
@@ -101,7 +101,7 @@ apply_step_offset(double offset)
 /* ================================================== */
 
 static void
-offset_convert(struct timespec *raw, double *corr, double *err)
+get_offset(clk_DriverContext *context, struct timespec *raw, double *corr, double *err)
 {
   double duration;
 
@@ -121,14 +121,20 @@ offset_convert(struct timespec *raw, double *corr, double *err)
 /* ================================================== */
 
 void
-SYS_Null_Initialise(void)
+SYS_Null_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
+  if (CLK_GetId(clock) != CLOCK_REALTIME)
+    LOG_FATAL("Unsupported clock");
+
   freq = 0.0;
   offset_register = 0.0;
   UTI_ZeroTimespec(&last_update);
 
-  lcl_RegisterSystemDrivers(read_frequency, set_frequency, accrue_offset,
-                            apply_step_offset, offset_convert, NULL, NULL);
+  driver->read_frequency = read_frequency;
+  driver->set_frequency = set_frequency;
+  driver->accumulate_offset = accumulate_offset;
+  driver->get_offset = get_offset;
+  driver->apply_step_offset = apply_step_offset;
 
   LOG(LOGS_INFO, "Disabled control of system clock");
 }
@@ -136,6 +142,6 @@ SYS_Null_Initialise(void)
 /* ================================================== */
 
 void
-SYS_Null_Finalise(void)
+SYS_Null_FinaliseClockDriver(struct clk_Driver *driver)
 {
 }

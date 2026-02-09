@@ -28,6 +28,7 @@
 
 #include "sysincl.h"
 
+#include "clocks_priv.h"
 #include "logging.h"
 #include "privops.h"
 #include "sys_solaris.h"
@@ -61,8 +62,11 @@ set_dosynctodr(int on_off)
 /* ================================================== */
 
 void
-SYS_Solaris_Initialise(void)
+SYS_Solaris_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
+  if (CLK_GetId(clock) != CLOCK_REALTIME)
+    LOG_FATAL("Unsupported clock");
+
   /* The kernel keeps the system clock and hardware clock synchronised to each
      other.  The dosynctodr variable needs to be set to zero to prevent the
      the system clock from following the hardware clock when the system clock
@@ -70,16 +74,15 @@ SYS_Solaris_Initialise(void)
   set_dosynctodr(0);
 
   /* The kernel allows the frequency to be set in the full range off int32_t */
-  SYS_Timex_InitialiseWithFunctions(32500, 1.0 / 100, NULL, NULL, NULL,
-                                    0.0, 0.0, NULL, NULL);
+  SYS_Timex_InitialiseClockDriver(driver, clock, 32500, 1.0 / 100, 0.0, 0.0);
 }
 
 /* ================================================== */
 
 void
-SYS_Solaris_Finalise(void)
+SYS_Solaris_FinaliseClockDriver(struct clk_Driver *driver)
 {
-  SYS_Timex_Finalise();
+  SYS_Timex_FinaliseClockDriver(driver);
 }
 
 /* ================================================== */

@@ -86,9 +86,6 @@
 /* This is the uncompensated system tick value */
 static int nominal_tick;
 
-/* Current tick value */
-static int current_delta_tick;
-
 /* The maximum amount by which 'tick' can be biased away from 'nominal_tick'
    (sys_adjtimex() in the kernel bounds this to 10%) */
 static int max_tick_bias;
@@ -147,9 +144,7 @@ set_frequency(double freq_ppm)
 
   SYS_Timex_Adjust(&txc, 0);
 
-  current_delta_tick = required_delta_tick;
-
-  return sys_hz * current_delta_tick - txc.freq / FREQ_SCALE;
+  return sys_hz * required_delta_tick - txc.freq / FREQ_SCALE;
 }
 
 /* ================================================== */
@@ -164,9 +159,7 @@ read_frequency(void)
 
   SYS_Timex_Adjust(&txc, 0);
 
-  current_delta_tick = nominal_tick - txc.tick;
-
-  return sys_hz * current_delta_tick - txc.freq / FREQ_SCALE;
+  return sys_hz * (nominal_tick - txc.tick) - txc.freq / FREQ_SCALE;
 }
 
 /* ================================================== */

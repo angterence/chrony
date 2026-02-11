@@ -471,7 +471,9 @@ SCH_RemoveTimeout(SCH_TimeoutID id)
 {
   TimerQueueEntry *ptr;
 
-  assert(initialised);
+  /* Ignore late attempts */
+  if (!initialised)
+    return;
 
   if (!id)
     return;

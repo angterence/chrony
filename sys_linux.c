@@ -114,7 +114,7 @@ apply_step_offset(clk_DriverContext *context, double offset)
     txc.time.tv_usec += 1000000000;
   }
 
-  if (SYS_Timex_Adjust(&txc, 1) < 0)
+  if (SYS_Timex_Adjust(context, &txc, 1) < 0)
     return 0;
 
   return 1;
@@ -143,7 +143,7 @@ set_frequency(clk_DriverContext *context, double freq_ppm)
   txc.freq = required_freq * FREQ_SCALE;
   txc.tick = required_tick;
 
-  SYS_Timex_Adjust(&txc, 0);
+  SYS_Timex_Adjust(context, &txc, 0);
 
   return sys_hz * required_delta_tick - txc.freq / FREQ_SCALE;
 }
@@ -158,7 +158,7 @@ read_frequency(clk_DriverContext *context)
 
   txc.modes = 0;
 
-  SYS_Timex_Adjust(&txc, 0);
+  SYS_Timex_Adjust(context, &txc, 0);
 
   return sys_hz * (nominal_tick - txc.tick) - txc.freq / FREQ_SCALE;
 }
@@ -178,7 +178,8 @@ guess_hz(void)
   double tick_nominal;
 
   txc.modes = 0;
-  SYS_Timex_Adjust(&txc, 0);
+  if (adjtimex(&txc) < 0)
+    LOG_FATAL("adjtimex failed");
   tick = txc.tick;
 
   /* Pick off the hz=100 case first */

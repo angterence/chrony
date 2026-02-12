@@ -211,6 +211,13 @@ initialise_timex(void)
   txc.modes = MOD_STATUS;
   txc.status = sys_status;
   SYS_Timex_Adjust(&txc, 0);
+
+#ifdef LINUX
+  /* Reset adjtime() offset */
+  txc.modes = ADJ_OFFSET_SINGLESHOT;
+  txc.offset = 0;
+  SYS_Timex_Adjust(&txc, 0);
+#endif
 }
 
 /* ================================================== */

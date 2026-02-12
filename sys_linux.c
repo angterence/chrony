@@ -293,20 +293,6 @@ get_version_specific_details(void)
 /* ================================================== */
 
 static void
-reset_adjtime_offset(void)
-{
-  struct timex txc;
-
-  /* Reset adjtime() offset */
-  txc.modes = ADJ_OFFSET_SINGLESHOT;
-  txc.offset = 0;
-
-  SYS_Timex_Adjust(&txc, 0);
-}
-
-/* ================================================== */
-
-static void
 report_time_adjust_blockers(void)
 {
 #if defined(FEAT_PRIVDROP) && defined(CAP_IS_SUPPORTED)
@@ -325,8 +311,6 @@ SYS_Linux_Initialise(void)
   get_version_specific_details();
 
   report_time_adjust_blockers();
-
-  reset_adjtime_offset();
 
   SYS_Timex_InitialiseWithFunctions(1.0e6 * max_tick_bias / nominal_tick,
                                     1.0 / tick_update_hz,

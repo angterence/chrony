@@ -91,6 +91,9 @@ extern void LCL_AddParameterChangeHandler(LCL_ParameterChangeHandler handler, vo
 /* Remove a handler */
 extern void LCL_RemoveParameterChangeHandler(LCL_ParameterChangeHandler, void *anything);
 
+/* Move the last handler in the list to the beginning */
+extern void LCL_MakeLastParameterChangeHandlerFirst(void);
+
 /* Check if a handler is invoked first when dispatching */
 extern int LCL_IsFirstParameterChangeHandler(LCL_ParameterChangeHandler handler);
 

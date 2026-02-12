@@ -140,6 +140,9 @@ SCH_Initialise(void)
 
   LCL_AddParameterChangeHandler(handle_slew, NULL);
 
+  /* This handler needs to be the first one invoked */
+  LCL_MakeLastParameterChangeHandlerFirst();
+
   LCL_ReadRawTime(&last_select_ts_raw);
   last_select_ts = last_select_ts_raw;
   last_select_ts_mono = 0.0;

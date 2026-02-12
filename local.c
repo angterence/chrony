@@ -429,6 +429,27 @@ LCL_IsFirstParameterChangeHandler(LCL_ParameterChangeHandler handler)
 
 /* ================================================== */
 
+void
+LCL_MakeLastParameterChangeHandlerFirst(void)
+{
+  ChangeListEntry *ptr;
+
+  BRIEF_ASSERT(change_list.next != &change_list);
+
+  /* Remove the last handler from the list */
+  ptr = change_list.prev;
+  ptr->next->prev = ptr->prev;
+  ptr->prev->next = ptr->next;
+
+  /* And add it back to the beginning */
+  ptr->prev = &change_list;
+  ptr->next = change_list.next;
+  change_list.next->prev = ptr;
+  change_list.next = ptr;
+}
+
+/* ================================================== */
+
 static void
 invoke_parameter_change_handlers(struct timespec *raw, struct timespec *cooked,
                                  double dfreq, double doffset,

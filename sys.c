@@ -33,18 +33,17 @@
 #include "sys_null.h"
 #include "logging.h"
 
+#include "sys_posix.h"
+
 #if defined(LINUX)
 #include "sys_linux.h"
-#include "sys_posix.h"
 #elif defined(SOLARIS)
 #include "sys_solaris.h"
-#include "sys_posix.h"
 #elif defined(NETBSD) || defined(FREEBSD)
 #include "sys_netbsd.h"
 #include "sys_posix.h"
 #elif defined(OPENBSD)
 #include "sys_openbsd.h"
-#include "sys_posix.h"
 #elif defined(MACOSX)
 #include "sys_macosx.h"
 #endif

@@ -22,7 +22,8 @@
 
   =======================================================================
 
-  Driver for systems that implement the adjtimex()/ntp_adjtime() system call
+  Driver for systems that implement the adjtimex()/ntp_adjtime() or
+  clock_adjtime() system call
   */
 
 #include "config.h"
@@ -64,6 +65,8 @@
 #define MIN_TICK_RATE 100
 
 struct timex_context {
+  CLK_Instance clock;
+
   /* Saved timex status */
   int status;
 
@@ -125,6 +128,9 @@ set_leap(clk_DriverContext *context, int leap, int tai_offset)
   struct timex txc;
   int applied, prev_status;
 
+  if (CLK_GetId(tc->clock) != CLOCK_REALTIME)
+    return;
+
   txc.modes = 0;
   applied = SYS_Timex_Adjust(context, &txc, 0) == TIME_WAIT;
 
@@ -172,6 +178,9 @@ set_sync_status(clk_DriverContext *context, int synchronised, double est_error,
   struct timex_context *tc = context;
   struct timex txc;
 
+  if (!CLK_IsSystem(tc->clock))
+    return;
+
   if (synchronised) {
     if (est_error > MAX_SYNC_ERROR)
       est_error = MAX_SYNC_ERROR;
@@ -206,13 +215,18 @@ set_sync_status(clk_DriverContext *context, int synchronised, double est_error,
 /* ================================================== */
 
 static void
-initialise_timex(struct timex_context *tc)
+initialise_timex(struct timex_context *tc, CLK_Instance clock)
 {
   struct timex txc;
+
+  tc->clock = clock;
 
   tc->status = STA_UNSYNC;
   tc->tai_offset = 0;
   tc->last_status = -1;
+
+  if (!CLK_IsSystem(tc->clock))
+    return;
 
   /* Reset PLL offset */
   txc.modes = MOD_OFFSET | MOD_STATUS;
@@ -242,12 +256,9 @@ SYS_Timex_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock,
 {
   struct timex_context *tc;
 
-  if (CLK_GetId(clock) != CLOCK_REALTIME)
-    LOG_FATAL("Unsupported clock");
-
   tc = MallocNew(struct timex_context);
 
-  initialise_timex(tc);
+  initialise_timex(tc, clock);
 
   /* The lower drivers must not have their own context.  They will get the
      context of this driver to be able to call SYS_Timex_Adjust(), or they
@@ -281,13 +292,39 @@ int
 SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error)
 {
   struct timex_context *tc = context;
+  clockid_t clock_id;
   int state;
+
+  clock_id = CLK_GetId(tc->clock);
 
 #ifdef SOLARIS
   /* The kernel seems to check the constant even when it's not being set */
   if (!(txc->modes & MOD_TIMECONST))
     txc->constant = 10;
 #endif
+
+#ifdef LINUX
+  /* Older versions check the status for AUX clocks even when not being set */
+  if (!(txc->modes & MOD_STATUS))
+    txc->status = 0;
+
+  //TODO: add configure check? what about privops?
+  state = clock_adjtime(clock_id, txc);
+
+  if (state < 0) {
+    LOG(ignore_error ? LOGS_DEBUG : LOGS_FATAL,
+        "clock_adjtime(%ld, 0x%x) failed : %s", (long)clock_id, txc->modes,
+        strerror(errno));
+    return state;
+  }
+
+  /* Don't check garbage returned by PTP clocks */
+  if (!CLK_IsSystem(tc->clock))
+    return state;
+
+#else
+  if (clock_id != CLOCK_REALTIME)
+    LOG_FATAL("Unsupported clock");
 
   state = NTP_ADJTIME(txc);
 
@@ -296,6 +333,7 @@ SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error
         NTP_ADJTIME_NAME"(0x%x) failed : %s", txc->modes, strerror(errno));
     return state;
   }
+#endif
 
   /* This a good place to verify that nothing else is touching the clock,
      without making an additional timex call.  A clock update is normally

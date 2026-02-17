@@ -310,16 +310,27 @@ report_time_adjust_blockers(void)
 void
 SYS_Linux_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
+  double max_freq, max_freq_delay;
+
   get_version_specific_details();
 
   report_time_adjust_blockers();
 
-  driver->read_frequency = read_frequency;
-  driver->set_frequency = set_frequency;
+  if (CLK_IsSystem(clock)) {
+    driver->read_frequency = read_frequency;
+    driver->set_frequency = set_frequency;
+    max_freq = 1.0e6 * max_tick_bias / nominal_tick;
+    max_freq_delay = 1.0 / tick_update_hz;
+  } else {
+    /* PTP HW clock drivers don't use ticks */
+    /* TODO: driver dependent, use ioctl() */
+    max_freq = 500.0;
+    max_freq_delay = 1.0 / tick_update_hz;
+  }
+
   driver->apply_step_offset = apply_step_offset;
 
-  SYS_Timex_InitialiseClockDriver(driver, clock, 1.0e6 * max_tick_bias / nominal_tick,
-                                  1.0 / tick_update_hz, 0.0, 0.0);
+  SYS_Timex_InitialiseClockDriver(driver, clock, max_freq, max_freq_delay, 0.0, 0.0);
 }
 
 /* ================================================== */

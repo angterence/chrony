@@ -31,36 +31,41 @@
 #include "sys_null.h"
 
 #include "clocks_priv.h"
-#include "local.h"
 #include "logging.h"
+#include "memory.h"
 #include "util.h"
-
-/* Current frequency offset of the system clock (in ppm) */
-static double freq;
-
-/* Offset of the system clock at the last update */
-static double offset_register;
-
-/* Time of the last update */
-static struct timespec last_update;
 
 /* Minimum interval between updates when frequency is constant */
 #define MIN_UPDATE_INTERVAL 1000.0
 
+struct null_context {
+  /* Tracked clock */
+  CLK_Instance clock;
+
+  /* Current frequency offset of the system clock (in ppm) */
+  double freq;
+
+  /* Offset of the system clock at the last update */
+  double offset_register;
+
+  /* Time of the last update */
+  struct timespec last_update;
+};
+
 /* ================================================== */
 
 static void
-update_offset(void)
+update_offset(struct null_context *nc)
 {
   struct timespec now;
   double duration;
 
-  LCL_ReadRawTime(&now);
-  duration = UTI_DiffTimespecsToDouble(&now, &last_update);
-  offset_register += 1.0e-6 * freq * duration;
-  last_update = now;
+  CLK_ReadTime(nc->clock, &now);
+  duration = UTI_DiffTimespecsToDouble(&now, &nc->last_update);
+  nc->offset_register += 1.0e-6 * nc->freq * duration;
+  nc->last_update = now;
 
-  DEBUG_LOG("System clock offset=%e freq=%f", offset_register, freq);
+  DEBUG_LOG("%s offset=%e freq=%f", CLK_GetName(nc->clock), nc->offset_register, nc->freq);
 }
 
 /* ================================================== */
@@ -68,7 +73,9 @@ update_offset(void)
 static double
 read_frequency(clk_DriverContext *context)
 {
-  return freq;
+  struct null_context *nc = context;
+
+  return nc->freq;
 }
 
 /* ================================================== */
@@ -76,10 +83,12 @@ read_frequency(clk_DriverContext *context)
 static double
 set_frequency(clk_DriverContext *context, double freq_ppm)
 {
-  update_offset();
-  freq = freq_ppm;
+  struct null_context *nc = context;
 
-  return freq;
+  update_offset(nc);
+  nc->freq = freq_ppm;
+
+  return nc->freq;
 }
 
 /* ================================================== */
@@ -87,7 +96,9 @@ set_frequency(clk_DriverContext *context, double freq_ppm)
 static void
 accumulate_offset(clk_DriverContext *context, double offset, double corr_rate)
 {
-  offset_register += offset;
+  struct null_context *nc = context;
+
+  nc->offset_register += offset;
 }
 
 /* ================================================== */
@@ -103,16 +114,17 @@ apply_step_offset(clk_DriverContext *context, double offset)
 static void
 get_offset(clk_DriverContext *context, struct timespec *raw, double *corr, double *err)
 {
+  struct null_context *nc = context;
   double duration;
 
-  duration = UTI_DiffTimespecsToDouble(raw, &last_update);
+  duration = UTI_DiffTimespecsToDouble(raw, &nc->last_update);
 
   if (duration > MIN_UPDATE_INTERVAL) {
-    update_offset();
+    update_offset(nc);
     duration = 0.0;
   }
 
-  *corr = -1.0e-6 * freq * duration - offset_register;
+  *corr = -1.0e-6 * nc->freq * duration - nc->offset_register;
 
   if (err)
     *err = 0.0;
@@ -123,20 +135,23 @@ get_offset(clk_DriverContext *context, struct timespec *raw, double *corr, doubl
 void
 SYS_Null_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 {
-  if (CLK_GetId(clock) != CLOCK_REALTIME)
-    LOG_FATAL("Unsupported clock");
+  struct null_context *nc;
 
-  freq = 0.0;
-  offset_register = 0.0;
-  UTI_ZeroTimespec(&last_update);
+  nc = MallocNew(struct null_context);
 
+  nc->clock = clock;
+  nc->freq = 0.0;
+  nc->offset_register = 0.0;
+  UTI_ZeroTimespec(&nc->last_update);
+
+  driver->context = nc;
   driver->read_frequency = read_frequency;
   driver->set_frequency = set_frequency;
   driver->accumulate_offset = accumulate_offset;
   driver->get_offset = get_offset;
   driver->apply_step_offset = apply_step_offset;
 
-  LOG(LOGS_INFO, "Disabled control of system clock");
+  LOG(LOGS_INFO, "Disabled control of %s", CLK_GetName(clock));
 }
 
 /* ================================================== */
@@ -144,4 +159,5 @@ SYS_Null_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
 void
 SYS_Null_FinaliseClockDriver(struct clk_Driver *driver)
 {
+  Free(driver->context);
 }

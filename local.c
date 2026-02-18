@@ -727,7 +727,7 @@ LCL_NotifyExternalTimeStep(struct timespec *raw, struct timespec *cooked,
   /* Dispatch to all handlers */
   invoke_parameter_change_handlers(raw, cooked, 0.0, offset, LCL_ChangeUnknownStep);
 
-  lcl_InvokeDispersionNotifyHandlers(dispersion);
+  LCL_InvokeDispersionNotifyHandlers(dispersion);
 }
 
 /* ================================================== */
@@ -808,7 +808,7 @@ LCL_AccumulateFrequencyAndOffsetNoHandlers(double dfreq, double doffset, double 
 /* ================================================== */
 
 void
-lcl_InvokeDispersionNotifyHandlers(double dispersion)
+LCL_InvokeDispersionNotifyHandlers(double dispersion)
 {
   DispersionNotifyListEntry *ptr;
 

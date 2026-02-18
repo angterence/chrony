@@ -116,13 +116,13 @@ typedef void (*LCL_DispersionNotifyHandler)(double dispersion, void *anything);
 
 /* Register a handler for being notified of dispersion being added to
    the local clock.  The handler MUST NOT unregister itself!!! */
-
 extern void LCL_AddDispersionNotifyHandler(LCL_DispersionNotifyHandler handler, void *anything);
 
 /* Delete a handler */
-
 extern void LCL_RemoveDispersionNotifyHandler(LCL_DispersionNotifyHandler handler, void *anything);
 
+/* Call the handlers */
+extern void LCL_InvokeDispersionNotifyHandlers(double dispersion);
 
 /* Read the absolute system frequency, relative to the uncompensated
    system.  Returned in units of parts per million.  Thus the result of

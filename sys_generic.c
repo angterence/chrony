@@ -246,7 +246,7 @@ update_slew(void)
      to all statistics held at higher levels in the system */
   slew_error = fabs((old_slew_freq - slew_freq) * max_freq_change_delay);
   if (slew_error >= MIN_OFFSET_CORRECTION)
-    lcl_InvokeDispersionNotifyHandlers(slew_error);
+    LCL_InvokeDispersionNotifyHandlers(slew_error);
 
   /* Compute the duration of the slew and clamp it.  If the slewing frequency
      is zero or has wrong sign (e.g. due to rounding in the frequency driver or
@@ -362,7 +362,7 @@ apply_step_offset(double offset)
   LCL_ReadRawTime(&old_time);
   err = UTI_DiffTimespecsToDouble(&old_time, &new_time);
 
-  lcl_InvokeDispersionNotifyHandlers(fabs(err));
+  LCL_InvokeDispersionNotifyHandlers(fabs(err));
 
   return 1;
 }

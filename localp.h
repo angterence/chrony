@@ -60,8 +60,6 @@ typedef void (*lcl_SetLeapDriver)(int leap, int tai_offset);
 /* System driver to set the synchronisation status */
 typedef void (*lcl_SetSyncStatusDriver)(int synchronised, double est_error, double max_error);
 
-extern void lcl_InvokeDispersionNotifyHandlers(double dispersion);
-
 extern void
 lcl_RegisterSystemDrivers(lcl_ReadFrequencyDriver read_freq,
                           lcl_SetFrequencyDriver set_freq,

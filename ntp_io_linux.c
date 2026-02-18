@@ -414,8 +414,13 @@ NIO_Linux_Initialise(void)
     break;
   }
 
-  ts_flags = SOF_TIMESTAMPING_SOFTWARE | SOF_TIMESTAMPING_RX_SOFTWARE;
-  ts_tx_flags = SOF_TIMESTAMPING_TX_SOFTWARE;
+  ts_flags = 0;
+  ts_tx_flags = 0;
+
+  if (CLK_GetId(LCL_GetLocalClock()) == CLOCK_REALTIME) {
+    ts_flags = SOF_TIMESTAMPING_SOFTWARE | SOF_TIMESTAMPING_RX_SOFTWARE;
+    ts_tx_flags = SOF_TIMESTAMPING_TX_SOFTWARE;
+  }
 
   if (hwts) {
     ts_flags |= SOF_TIMESTAMPING_RAW_HARDWARE | SOF_TIMESTAMPING_RX_HARDWARE;

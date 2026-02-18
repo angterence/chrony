@@ -64,7 +64,7 @@ send_and_recv(int type, int is_stream, int is_client_bound, int server_fd, int c
   TEST_CHECK(!SCK_IsReusable(server_fd));
   TEST_CHECK(!SCK_IsReusable(client_fd));
 
-  if (random() % 2 && !SCK_EnableKernelRxTimestamping(client_fd))
+  if (random() % 2 && !SCK_EnableKernelRxTimestamping(client_fd, CLOCK_REALTIME))
     ;
 
   UTI_GetRandomBytes(buf1, sizeof (buf1));

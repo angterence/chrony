@@ -144,7 +144,7 @@ open_socket(int family, int local_port, int client_only, IPSockAddr *remote_addr
 #ifdef HAVE_LINUX_TIMESTAMPING
   if (!NIO_Linux_SetTimestampSocketOptions(sock_fd, client_only, &events))
 #endif
-    if (!SCK_EnableKernelRxTimestamping(sock_fd))
+    if (!SCK_EnableKernelRxTimestamping(sock_fd, CLK_GetId(LCL_GetLocalClock())))
       ;
 
   /* Register handler for read and possibly exception events on the socket */

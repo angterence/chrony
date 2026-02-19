@@ -180,7 +180,7 @@ static void
 update_slew(void)
 {
   double old_slew_freq, total_freq, corr_freq, duration, excess_duration;
-  struct timespec now, end_of_slew;
+  struct timespec now;
 
   /* Remove currently running timeout */
   SCH_RemoveTimeout(slew_timeout_id);
@@ -264,8 +264,7 @@ update_slew(void)
   }
 
   /* Restart timer for the next update */
-  UTI_AddDoubleToTimespec(&now, duration, &end_of_slew);
-  slew_timeout_id = SCH_AddTimeout(&end_of_slew, handle_end_of_slew, NULL);
+  slew_timeout_id = SCH_AddTimeoutByDelay(duration, handle_end_of_slew, NULL);
   slew_start = now;
   slew_duration = duration;
 

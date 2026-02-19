@@ -120,7 +120,7 @@ clock_initialise(void)
   drift_removal_interval = DRIFT_REMOVAL_INTERVAL;
   current_drift_removal_interval = DRIFT_REMOVAL_INTERVAL;
 
-  LCL_ReadRawTime(&T0);
+  UTI_ZeroTimespec(&T0);
   Tdrift = T0;
   last_rtc_sync = T0;
 

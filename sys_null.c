@@ -123,8 +123,9 @@ offset_convert(struct timespec *raw, double *corr, double *err)
 void
 SYS_Null_Initialise(void)
 {
+  freq = 0.0;
   offset_register = 0.0;
-  LCL_ReadRawTime(&last_update);
+  UTI_ZeroTimespec(&last_update);
 
   lcl_RegisterSystemDrivers(read_frequency, set_frequency, accrue_offset,
                             apply_step_offset, offset_convert, NULL, NULL);

@@ -188,7 +188,7 @@ SYS_OpenBSD_Initialise(void)
   cinfo = get_clockinfo();
   reset_adjtime_offset();
 
-  LCL_ReadRawTime(&last_rtc_sync);
+  UTI_ZeroTimespec(&last_rtc_sync);
 
   SYS_Generic_CompleteFreqDriver(MAX_FREQ, 1.0 / cinfo.hz,
                                  read_frequency, set_frequency, NULL,

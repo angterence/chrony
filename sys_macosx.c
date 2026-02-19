@@ -105,6 +105,10 @@ static struct timespec last_rtc_sync;
 
 /* ================================================== */
 
+static void drift_removal_timeout(SCH_ArbitraryArgument not_used);
+
+/* ================================================== */
+
 static void
 clock_initialise(void)
 {
@@ -264,6 +268,9 @@ set_frequency(double new_freq_ppm)
   stop_adjust();
   current_freq = new_freq_ppm * 1.0e-6;
   start_adjust();
+
+  if (drift_removal_id == 0)
+    drift_removal_id = SCH_AddTimeoutByDelay(drift_removal_interval, drift_removal_timeout, NULL);
 
   return current_freq * 1.0e6;
 }
@@ -436,7 +443,7 @@ legacy_MacOSX_Initialise(void)
                             set_sync_status);
 
 
-  drift_removal_id = SCH_AddTimeoutByDelay(drift_removal_interval, drift_removal_timeout, NULL);
+  drift_removal_id = 0;
 }
 
 /* ================================================== */

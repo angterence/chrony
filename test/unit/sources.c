@@ -44,8 +44,8 @@ test_unit(void)
   char conf[128];
 
   CNF_Initialise(0, 0);
+  CLK_Initialise(0);
   LCL_Initialise();
-  TST_RegisterDummyDrivers();
   SCH_Initialise();
   SRC_Initialise();
   REF_Initialise();
@@ -285,6 +285,7 @@ test_unit(void)
   SRC_Finalise();
   SCH_Finalise();
   LCL_Finalise();
+  CLK_Finalise();
   CNF_Finalise();
   HSH_Finalise();
 }

@@ -25,6 +25,7 @@
 
 #include <nts_ke_session.c>
 
+#include <conf.h>
 #include <local.h>
 #include <socket.h>
 #include <sched.h>
@@ -178,8 +179,9 @@ test_unit(void)
   uint32_t cert_id;
   NKE_Key c2s, s2c;
 
+  CNF_Initialise(0, 0);
+  CLK_Initialise(0);
   LCL_Initialise();
-  TST_RegisterDummyDrivers();
 
   cert = "nts_ke.crt";
   key = "nts_ke.key";
@@ -233,6 +235,8 @@ test_unit(void)
   }
 
   LCL_Finalise();
+  CLK_Finalise();
+  CNF_Finalise();
 }
 #else
 void

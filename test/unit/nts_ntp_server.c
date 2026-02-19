@@ -127,8 +127,8 @@ test_unit(void)
   for (i = 0; i < sizeof conf / sizeof conf[0]; i++)
     CNF_ParseLine(NULL, i + 1, conf[i]);
 
+  CLK_Initialise(0);
   LCL_Initialise();
-  TST_RegisterDummyDrivers();
   SCH_Initialise();
   NKS_PreInitialise(0, 0, 0);
   NKS_Initialise();
@@ -169,6 +169,7 @@ test_unit(void)
   NKS_Finalise();
   SCH_Finalise();
   LCL_Finalise();
+  CLK_Finalise();
   CNF_Finalise();
 }
 #else

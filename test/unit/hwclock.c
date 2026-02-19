@@ -19,6 +19,7 @@
  */
 
 #include <config.h>
+#include <conf.h>
 #include "test.h"
 
 #if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
@@ -36,8 +37,9 @@ test_unit(void)
   HCL_Instance clock;
   double freq, jitter, interval, dj, err, sum;
 
+  CNF_Initialise(0, 0);
+  CLK_Initialise(0);
   LCL_Initialise();
-  TST_RegisterDummyDrivers();
 
   for (i = 1; i <= 8; i++) {
     clock = HCL_CreateInstance(random() % (1 << i), 1 << i, 1.0, 1e-9);
@@ -109,6 +111,8 @@ test_unit(void)
   }
 
   LCL_Finalise();
+  CLK_Finalise();
+  CNF_Finalise();
 }
 #else
 void

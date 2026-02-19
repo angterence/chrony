@@ -111,6 +111,7 @@ test_unit(void)
   CNF_Initialise(0, 0);
   for (i = 0; i < sizeof conf / sizeof conf[0]; i++)
     CNF_ParseLine(NULL, i + 1, conf[i]);
+  CLK_Initialise(0);
   LCL_Initialise();
 
   generate_key_file(KEYFILE, key_ids);
@@ -218,6 +219,7 @@ test_unit(void)
 
   KEY_Finalise();
   LCL_Finalise();
+  CLK_Finalise();
   CNF_Finalise();
   HSH_Finalise();
 }

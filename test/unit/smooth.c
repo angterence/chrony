@@ -32,6 +32,7 @@ test_unit(void)
   CNF_Initialise(0, 0);
   CNF_ParseLine(NULL, 1, conf);
 
+  CLK_Initialise(0);
   LCL_Initialise();
   SMT_Initialise();
   locked = 0;
@@ -59,5 +60,6 @@ test_unit(void)
 
   SMT_Finalise();
   LCL_Finalise();
+  CLK_Finalise();
   CNF_Finalise();
 }

@@ -47,6 +47,7 @@ static lcl_SetSyncStatusDriver drv_set_sync_status;
 static lcl_AccrueOffsetDriver drv_accrue_offset;
 static lcl_OffsetCorrectionDriver drv_get_offset_correction;
 static lcl_ApplyStepOffsetDriver drv_apply_step_offset;
+static lcl_SetLeapDriver drv_set_leap;
 
 /* Current frequency as requested by the local module (in ppm) */
 static double base_freq;
@@ -365,6 +366,15 @@ apply_step_offset(double offset)
 /* ================================================== */
 
 static void
+set_leap(int leap, int tai_offset)
+{
+  if (drv_set_leap)
+    drv_set_leap(leap, tai_offset);
+}
+
+/* ================================================== */
+
+static void
 set_sync_status(int synchronised, double est_error, double max_error)
 {
   double offset;
@@ -397,6 +407,7 @@ SYS_Generic_CompleteFreqDriver(double max_set_freq_ppm, double max_set_freq_dela
   drv_set_freq = sys_set_freq;
   drv_accrue_offset = sys_accrue_offset;
   drv_get_offset_correction = sys_get_offset_correction;
+  drv_set_leap = sys_set_leap;
   drv_set_sync_status = sys_set_sync_status;
   drv_apply_step_offset = sys_apply_step_offset;
 
@@ -413,7 +424,7 @@ SYS_Generic_CompleteFreqDriver(double max_set_freq_ppm, double max_set_freq_dela
 
   lcl_RegisterSystemDrivers(read_frequency, set_frequency,
                             accrue_offset, apply_step_offset,
-                            offset_convert, sys_set_leap, set_sync_status);
+                            offset_convert, set_leap, set_sync_status);
 }
 
 /* ================================================== */

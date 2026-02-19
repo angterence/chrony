@@ -46,6 +46,7 @@ static lcl_SetFrequencyDriver drv_set_freq;
 static lcl_SetSyncStatusDriver drv_set_sync_status;
 static lcl_AccrueOffsetDriver drv_accrue_offset;
 static lcl_OffsetCorrectionDriver drv_get_offset_correction;
+static lcl_ApplyStepOffsetDriver drv_apply_step_offset;
 
 /* Current frequency as requested by the local module (in ppm) */
 static double base_freq;
@@ -116,18 +117,6 @@ static int fastslew_active;
 
 static void handle_end_of_slew(void *anything);
 static void update_slew(void);
-
-/* ================================================== */
-/* Adjust slew_start on clock step */
-
-static void
-handle_step(struct timespec *raw, struct timespec *cooked, double dfreq,
-            double doffset, LCL_ChangeType change_type, void *anything)
-{
-  if (change_type == LCL_ChangeStep) {
-    UTI_AddDoubleToTimespec(&slew_start, -doffset, &slew_start);
-  }
-}
 
 /* ================================================== */
 
@@ -350,18 +339,25 @@ apply_step_offset(double offset)
   struct timespec old_time, new_time;
   double err;
 
-  LCL_ReadRawTime(&old_time);
-  UTI_AddDoubleToTimespec(&old_time, -offset, &new_time);
+  if (drv_apply_step_offset) {
+    if (!drv_apply_step_offset(offset))
+      return 0;
+  } else {
+    LCL_ReadRawTime(&old_time);
+    UTI_AddDoubleToTimespec(&old_time, -offset, &new_time);
 
-  if (PRV_SetTime(CLOCK_REALTIME, &new_time) < 0) {
-    DEBUG_LOG("clock_settime() failed");
-    return 0;
+    if (PRV_SetTime(CLOCK_REALTIME, &new_time) < 0) {
+      DEBUG_LOG("clock_settime() failed");
+      return 0;
+    }
+
+    LCL_ReadRawTime(&old_time);
+    err = UTI_DiffTimespecsToDouble(&old_time, &new_time);
+
+    LCL_InvokeDispersionNotifyHandlers(fabs(err));
   }
 
-  LCL_ReadRawTime(&old_time);
-  err = UTI_DiffTimespecsToDouble(&old_time, &new_time);
-
-  LCL_InvokeDispersionNotifyHandlers(fabs(err));
+  UTI_AddDoubleToTimespec(&slew_start, -offset, &slew_start);
 
   return 1;
 }
@@ -402,6 +398,7 @@ SYS_Generic_CompleteFreqDriver(double max_set_freq_ppm, double max_set_freq_dela
   drv_accrue_offset = sys_accrue_offset;
   drv_get_offset_correction = sys_get_offset_correction;
   drv_set_sync_status = sys_set_sync_status;
+  drv_apply_step_offset = sys_apply_step_offset;
 
   base_freq = (*drv_read_freq)();
   slew_freq = 0.0;
@@ -415,11 +412,8 @@ SYS_Generic_CompleteFreqDriver(double max_set_freq_ppm, double max_set_freq_dela
   fastslew_active = 0;
 
   lcl_RegisterSystemDrivers(read_frequency, set_frequency,
-                            accrue_offset, sys_apply_step_offset ?
-                              sys_apply_step_offset : apply_step_offset,
+                            accrue_offset, apply_step_offset,
                             offset_convert, sys_set_leap, set_sync_status);
-
-  LCL_AddParameterChangeHandler(handle_step, NULL);
 }
 
 /* ================================================== */
@@ -439,8 +433,6 @@ SYS_Generic_Finalise(void)
 
   LCL_ReadRawTime(&now);
   stop_fastslew(&now);
-
-  LCL_RemoveParameterChangeHandler(handle_step, NULL);
 }
 
 /* ================================================== */

@@ -177,9 +177,7 @@ guess_hz(void)
   int i, tick, tick_lo, tick_hi, ihz;
   double tick_nominal;
 
-  txc.modes = 0;
-  if (adjtimex(&txc) < 0)
-    LOG_FATAL("adjtimex failed");
+  SYS_Timex_Read(CLOCK_REALTIME, &txc);
   tick = txc.tick;
 
   /* Pick off the hz=100 case first */

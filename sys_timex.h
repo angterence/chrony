@@ -38,7 +38,10 @@ extern void SYS_Timex_InitialiseClockDriver(struct clk_Driver *driver, CLK_Insta
 
 extern void SYS_Timex_FinaliseClockDriver(struct clk_Driver *driver);
 
-/* Wrapper for adjtimex()/ntp_adjtime() */
+/* Wrapper for adjtimex()/ntp_adjtime()/clock_adjtime() */
 extern int SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error);
+
+/* Wrapper for read-only adjtimex()/ntp_adjtime()/clock_adjtime() */
+extern void SYS_Timex_Read(clockid_t clock_id, struct timex *txc);
 
 #endif  /* GOT_SYS_GENERIC_H */

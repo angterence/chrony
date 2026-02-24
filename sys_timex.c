@@ -288,14 +288,10 @@ SYS_Timex_FinaliseClockDriver(struct clk_Driver *driver)
 
 /* ================================================== */
 
-int
-SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error)
+static int
+adjust_timex(clockid_t clock_id, struct timex *txc, int ignore_error)
 {
-  struct timex_context *tc = context;
-  clockid_t clock_id;
   int state;
-
-  clock_id = CLK_GetId(tc->clock);
 
 #ifdef SOLARIS
   /* The kernel seems to check the constant even when it's not being set */
@@ -315,13 +311,7 @@ SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error
     LOG(ignore_error ? LOGS_DEBUG : LOGS_FATAL,
         "clock_adjtime(%ld, 0x%x) failed : %s", (long)clock_id, txc->modes,
         strerror(errno));
-    return state;
   }
-
-  /* Don't check garbage returned by PTP clocks */
-  if (!CLK_IsSystem(tc->clock))
-    return state;
-
 #else
   if (clock_id != CLOCK_REALTIME)
     LOG_FATAL("Unsupported clock");
@@ -331,9 +321,25 @@ SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error
   if (state < 0) {
     LOG(ignore_error ? LOGS_DEBUG : LOGS_FATAL,
         NTP_ADJTIME_NAME"(0x%x) failed : %s", txc->modes, strerror(errno));
-    return state;
   }
 #endif
+
+  return state;
+}
+
+/* ================================================== */
+
+int
+SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error)
+{
+  struct timex_context *tc = context;
+  int state;
+
+  state = adjust_timex(CLK_GetId(tc->clock), txc, ignore_error);
+
+  /* Don't check garbage returned by PTP clocks */
+  if (!CLK_IsSystem(tc->clock))
+    return state;
 
   /* This a good place to verify that nothing else is touching the clock,
      without making an additional timex call.  A clock update is normally
@@ -352,4 +358,13 @@ SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error
   tc->last_freq = txc->freq;
 
   return state;
+}
+
+/* ================================================== */
+
+void
+SYS_Timex_Read(clockid_t clock_id, struct timex *txc)
+{
+  memset(txc, 0, sizeof (*txc));
+  adjust_timex(clock_id, txc, 0);
 }

@@ -320,10 +320,19 @@ SYS_Linux_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock)
     max_freq = 1.0e6 * max_tick_bias / nominal_tick;
     max_freq_delay = 1.0 / tick_update_hz;
   } else {
+#if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
     /* PTP HW clock drivers don't use ticks */
-    /* TODO: driver dependent, use ioctl() */
-    max_freq = 500.0;
+    struct ptp_clock_caps caps;
+
+    if (ioctl(CLK_GetFd(clock), PTP_CLOCK_GETCAPS, &caps))
+      LOG_FATAL("ioctl(%s) failed : %s", "PTP_CLOCK_GETCAPS", strerror(errno));
+
+    /* Convert from ppb to ppm */
+    max_freq = caps.max_adj / 1000;
     max_freq_delay = 1.0 / tick_update_hz;
+#else
+    LOG_FATAL("Unsupported clock");
+#endif
   }
 
   driver->apply_step_offset = apply_step_offset;

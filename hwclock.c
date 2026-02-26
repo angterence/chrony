@@ -29,8 +29,8 @@
 #include "sysincl.h"
 
 #include "array.h"
+#include "clocks.h"
 #include "hwclock.h"
-#include "local.h"
 #include "logging.h"
 #include "memory.h"
 #include "quantiles.h"
@@ -53,6 +53,8 @@
 #define DELAY_QUANT_MIN_STEP 1.0e-9
 
 struct HCL_Instance_Record {
+  CLK_Instance local_clock;
+
   /* HW and local reference timestamp */
   struct timespec hw_ref;
   struct timespec local_ref;
@@ -89,14 +91,10 @@ struct HCL_Instance_Record {
 
 /* ================================================== */
 
-static void
-handle_slew(struct timespec *raw, struct timespec *cooked, double dfreq,
-            double doffset, LCL_ChangeType change_type, void *anything)
+void
+HCL_SlewLocal(HCL_Instance clock, struct timespec *cooked, double dfreq, double doffset)
 {
-  HCL_Instance clock;
   double delta;
-
-  clock = anything;
 
   if (clock->n_samples)
     UTI_AdjustTimespec(&clock->local_ref, cooked, &clock->local_ref, &delta, dfreq, doffset);
@@ -107,7 +105,8 @@ handle_slew(struct timespec *raw, struct timespec *cooked, double dfreq,
 /* ================================================== */
 
 HCL_Instance
-HCL_CreateInstance(int min_samples, int max_samples, double min_separation, double precision)
+HCL_CreateInstance(CLK_Instance local_clock, int min_samples, int max_samples,
+                   double min_separation, double precision)
 {
   HCL_Instance clock;
 
@@ -116,6 +115,7 @@ HCL_CreateInstance(int min_samples, int max_samples, double min_separation, doub
   max_samples = MAX(min_samples, max_samples);
 
   clock = MallocNew(struct HCL_Instance_Record);
+  clock->local_clock = local_clock;
   clock->x_data = MallocArray(double, max_samples);
   clock->y_data = MallocArray(double, max_samples);
   clock->x_data[max_samples - 1] = 0.0;
@@ -131,8 +131,6 @@ HCL_CreateInstance(int min_samples, int max_samples, double min_separation, doub
                                            DELAY_QUANT_LARGE_STEP_DELAY,
                                            DELAY_QUANT_MIN_STEP);
 
-  LCL_AddParameterChangeHandler(handle_slew, clock);
-
   return clock;
 }
 
@@ -140,7 +138,6 @@ HCL_CreateInstance(int min_samples, int max_samples, double min_separation, doub
 
 void HCL_DestroyInstance(HCL_Instance clock)
 {
-  LCL_RemoveParameterChangeHandler(handle_slew, clock);
   QNT_DestroyInstance(clock->delay_quants);
   Free(clock->y_data);
   Free(clock->x_data);
@@ -175,8 +172,8 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
     return 0;
 
   /* Work out the current correction multiplier needed to get cooked delays */
-  LCL_CookTime(&tss[0][0], &ts1, NULL);
-  LCL_CookTime(&tss[n_readings - 1][2], &ts2, NULL);
+  CLK_CookTime(clock->local_clock, &tss[0][0], &ts1, NULL);
+  CLK_CookTime(clock->local_clock, &tss[n_readings - 1][2], &ts2, NULL);
   if (UTI_CompareTimespecs(&tss[0][0], &tss[n_readings - 1][2]) < 0)
     freq = UTI_DiffTimespecsToDouble(&ts1, &ts2) /
            UTI_DiffTimespecsToDouble(&tss[0][0], &tss[n_readings - 1][2]);
@@ -200,7 +197,7 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
     QNT_Accumulate(clock->delay_quants, delay);
   }
 
-  local_prec = LCL_GetSysPrecisionAsQuantum();
+  local_prec = CLK_GetPrecision(clock->local_clock);
 
   low_delay = QNT_GetQuantile(clock->delay_quants, QNT_GetMinK(clock->delay_quants)) -
               QNT_GetMinStep(clock->delay_quants) / 2.0;
@@ -249,7 +246,7 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
   *err = MAX(min_delay / 2.0, clock->precision);
 
   pred_err = 0.0;
-  LCL_CookTime(local_ts, &ts1, NULL);
+  CLK_CookTime(clock->local_clock, local_ts, &ts1, NULL);
   if (!HCL_CookTime(clock, hw_ts, &ts2, &e) ||
       ((pred_err = UTI_DiffTimespecsToDouble(&ts1, &ts2)) > *err)) {
     *quality = 1;
@@ -271,7 +268,7 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
   double hw_delta, local_delta, local_freq, raw_freq;
   int i, n_runs, best_start;
 
-  local_freq = 1.0 - LCL_ReadAbsoluteFrequency() / 1.0e6;
+  local_freq = 1.0 - CLK_GetFrequency(clock->local_clock) / 1.0e6;
 
   /* Shift old samples */
   if (clock->n_samples) {

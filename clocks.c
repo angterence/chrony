@@ -38,6 +38,7 @@
 #include "logging.h"
 #include "memory.h"
 #include "util.h"
+#include "sched.h"
 #include "sys.h"
 #include "sys_null.h"
 
@@ -46,6 +47,9 @@
 #endif
 
 #define INVALID_CLOCK_FD -1
+
+/* Number of PHC readings per HW clock sample */
+#define PHC_READINGS 25
 
 /* Minimum and maximum interval between PHC readings */
 #define MIN_PHC_POLL -6
@@ -73,7 +77,12 @@ struct CLK_Instance_Record {
   int max_samples;
   int nocrossts;
 
+  CLK_Instance hwclock_reference;
   HCL_Instance hwclock;
+  SCH_TimeoutID hwclock_timeout_id;
+  int phc_mode;
+
+  int in_poll;
 };
 
 /* ================================================== */
@@ -84,6 +93,10 @@ static int control_allowed;
 static ARR_Instance clocks;
 
 static CLK_Instance main_clock;
+
+/* ================================================== */
+
+static int poll_phc(CLK_Instance inst, struct timespec *now);
 
 /* ================================================== */
 
@@ -424,7 +437,12 @@ CLK_Open(const char *name, int control)
   inst->max_samples = 16;
   inst->nocrossts = 0;
 
+  inst->hwclock_reference = NULL;
   inst->hwclock = NULL;
+  inst->hwclock_timeout_id = 0;
+  inst->phc_mode = 0;
+
+  inst->in_poll = 0;
 
   /* Verify that the clock works */
   CLK_ReadTime(inst, &ts);
@@ -477,6 +495,9 @@ CLK_Close(CLK_Instance inst)
   }
 
   SYS_FinaliseClockDriver(&inst->driver, inst->control);
+
+  if (inst->hwclock)
+    HCL_DestroyInstance(inst->hwclock);
 
   Free(inst->name);
   Free(inst);
@@ -574,6 +595,16 @@ CLK_GetFrequency(CLK_Instance inst)
 static void
 handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double doffset)
 {
+  CLK_Instance inst2;
+  unsigned int i;
+
+  for (i = 0; i < ARR_GetSize(clocks); i++) {
+    inst2 = get_record(i);
+    if (inst2->hwclock_reference != inst)
+      continue;
+
+    HCL_SlewLocal(inst2->hwclock, cooked, dfreq, doffset);
+  }
 }
 
 /* ================================================== */
@@ -733,10 +764,98 @@ CLK_CookTime(CLK_Instance inst, struct timespec *raw, struct timespec *cooked, d
 
 /* ================================================== */
 
+static void
+poll_timeout(void *arg)
+{
+  CLK_Instance inst = arg;
+  struct timespec now;
+
+  inst->hwclock_timeout_id = 0;
+
+  SCH_GetLastEventTime(&now, NULL, NULL);
+  poll_phc(inst, &now);
+}
+
+/* ================================================== */
+
+static int
+poll_phc(CLK_Instance inst, struct timespec *now)
+{
+  struct timespec sample_phc_ts, sample_sys_ts, sample_local_ts;
+  struct timespec phc_readings[PHC_READINGS][3], ts;
+  double phc_err, local_err, hw_err, interval;
+  int n_readings, quality;
+
+  if (!SCH_IsInitialised())
+    return 0;
+
+  if (inst->in_poll)
+    return 0;
+  inst->in_poll = 1;
+
+  if (!inst->hwclock)
+    inst->hwclock = HCL_CreateInstance(inst->hwclock_reference,
+                                       inst->min_samples, inst->max_samples,
+                                       UTI_Log2ToDouble(inst->minpoll),
+                                       CLK_GetPrecision(inst));
+
+  if (!now) {
+    now = &ts;
+    CLK_ReadTime(inst->hwclock_reference, now);
+    CLK_CookTime(inst->hwclock_reference, now, now, NULL);
+  }
+
+  if (!HCL_NeedsNewSample(inst->hwclock, now)) {
+    inst->in_poll = 0;
+    return 1;
+  }
+
+  DEBUG_LOG("Polling PHC on %s%s",
+            inst->name, inst->hwclock_timeout_id != 0 ? " before timeout" : "");
+
+  n_readings = SYS_Linux_GetPHCReadings(inst->fd, inst->hwclock_reference->id, inst->nocrossts,
+                                        &inst->phc_mode, PHC_READINGS, phc_readings);
+
+  /* Add timeout for the next poll in case no HW timestamp will be captured
+     between the minpoll and maxpoll.  Separate reading of different PHCs to
+     avoid long intervals between handling I/O events. */
+  SCH_RemoveTimeout(inst->hwclock_timeout_id);
+  interval = UTI_Log2ToDouble(inst->maxpoll);
+  inst->hwclock_timeout_id = SCH_AddTimeoutInClass(interval, interval /
+                                                     ARR_GetSize(clocks) / 4, 0.1,
+                                                   SCH_PhcPollClass, poll_timeout, inst);
+
+  if (n_readings <= 0) {
+    inst->in_poll = 0;
+    return 0;
+  }
+
+  if (!HCL_ProcessReadings(inst->hwclock, n_readings, phc_readings,
+                           &sample_phc_ts, &sample_sys_ts, &phc_err, &quality) ||
+      quality <= 0) {
+    inst->in_poll = 0;
+    return 1;
+  }
+
+  CLK_CookTime(inst->hwclock_reference, &sample_sys_ts, &sample_local_ts, &local_err);
+  CLK_CookTime(inst, &sample_phc_ts, &sample_phc_ts, &hw_err);
+  HCL_AccumulateSample(inst->hwclock, &sample_phc_ts, &sample_local_ts,
+                       phc_err + local_err + hw_err);
+
+  inst->in_poll = 0;
+
+  return 1;
+}
+
+/* ================================================== */
+
 int
 CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
                 CLK_Instance to, int to_cooked, struct timespec *to_ts, double *err)
 {
+  struct timespec ts1, ts2;
+  double err1, err2, err3;
+
   if (from->id == to->id) {
     if (from_cooked == to_cooked) {
       *to_ts = *from_ts;
@@ -747,6 +866,38 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
     } else {
       return 0;
     }
+    return 1;
+  }
+
+  if (!from->system && to->system) {
+    if (!from->hwclock_reference)
+      from->hwclock_reference = to;
+    if (from->hwclock_reference != to)
+      LOG_FATAL("Conflict");
+
+    if (!poll_phc(from, NULL))
+      return 0;
+
+    if (from_cooked) {
+      ts1 = *from_ts;
+      err1 = 0.0;
+    } else {
+      CLK_CookTime(from, from_ts, &ts1, &err1);
+    }
+
+    if (!HCL_CookTime(from->hwclock, &ts1, &ts2, &err2))
+      return 0;
+
+    if (to_cooked) {
+      *to_ts = ts2;
+      err3 = 0.0;
+    } else {
+      assert(0);
+    }
+
+    if (err)
+      *err = err1 + err2 + err3;
+
     return 1;
   }
 

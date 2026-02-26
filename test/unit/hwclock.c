@@ -39,10 +39,9 @@ test_unit(void)
 
   CNF_Initialise(0, 0);
   CLK_Initialise(0);
-  LCL_Initialise();
 
   for (i = 1; i <= 8; i++) {
-    clock = HCL_CreateInstance(random() % (1 << i), 1 << i, 1.0, 1e-9);
+    clock = HCL_CreateInstance(CLK_GetMainClock(), random() % (1 << i), 1 << i, 1.0, 1e-9);
 
     for (j = 0, count = 0, sum = 0.0; j < 100; j++) {
       UTI_ZeroTimespec(&start_hw_ts);
@@ -110,7 +109,6 @@ test_unit(void)
     HCL_DestroyInstance(clock);
   }
 
-  LCL_Finalise();
   CLK_Finalise();
   CNF_Finalise();
 }

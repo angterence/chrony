@@ -112,7 +112,9 @@ static int phc_initialise(RCL_Instance instance)
     phc->pin = phc->channel = 0;
   }
 
-  phc->clock = HCL_CreateInstance(0, 16, UTI_Log2ToDouble(RCL_GetDriverPoll(instance)),
+  //TODO add slewing or use CLK
+  phc->clock = HCL_CreateInstance(LCL_GetLocalClock(),
+                                  0, 16, UTI_Log2ToDouble(RCL_GetDriverPoll(instance)),
                                   RCL_GetPrecision(instance));
 
   RCL_SetDriverData(instance, phc);

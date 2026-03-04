@@ -178,10 +178,10 @@ MAI_CleanupAndExit(void)
   LDB_Finalise();
   RTC_Finalise();
 
-  SCK_Finalise();
   SCH_Finalise();
   LCL_Finalise();
   CLK_Finalise();
+  SCK_Finalise();
   PRV_Finalise();
 
   delete_pidfile();
@@ -666,10 +666,10 @@ int main
   write_pidfile();
 
   PRV_Initialise(scfilter_level);
+  SCK_Initialise(address_family);
   CLK_Initialise(clock_control);
   LCL_Initialise();
   SCH_Initialise();
-  SCK_Initialise(address_family);
 
   /* Start helper processes if needed */
   NKS_PreInitialise(pw->pw_uid, pw->pw_gid, scfilter_level);

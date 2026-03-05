@@ -145,7 +145,7 @@ stop_fastslew(struct generic_context *gc, struct timespec *now)
     return;
 
   /* Cancel the remaining offset */
-  gc->drv.get_offset(gc->drv.context, now, &corr, NULL);
+  corr = gc->drv.get_offset(gc->drv.context, 0, now, NULL);
   gc->drv.accumulate_offset(gc->drv.context, corr, 0.0);
   gc->offset_register -= corr;
 }
@@ -306,29 +306,43 @@ accumulate_offset(clk_DriverContext *context, double offset, double corr_rate)
 /* ================================================== */
 /* Determine the correction to generate the cooked time for given raw time */
 
-static void
-get_offset(clk_DriverContext *context, struct timespec *raw, double *corr, double *err)
+static double
+get_offset(clk_DriverContext *context, int reverse, struct timespec *ts, double *err)
 {
-  double duration, fastslew_corr, fastslew_err;
+  double duration, fastslew_corr, fastslew_err, offset;
   struct generic_context *gc = context;
 
-  duration = UTI_DiffTimespecsToDouble(raw, &gc->slew_start);
+  duration = UTI_DiffTimespecsToDouble(ts, &gc->slew_start);
 
   if (gc->drv.get_offset && gc->fastslew_active) {
-    gc->drv.get_offset(gc->drv.context, raw, &fastslew_corr, &fastslew_err);
+    fastslew_corr = gc->drv.get_offset(gc->drv.context, 0, ts, &fastslew_err);
     if (fastslew_corr == 0.0 && fastslew_err == 0.0)
       gc->fastslew_active = 0;
   } else {
     fastslew_corr = fastslew_err = 0.0;
   }
 
-  *corr = gc->slew_freq * duration + fastslew_corr - gc->offset_register;
-
   if (err) {
     *err = fastslew_err;
     if (fabs(duration) <= gc->max_freq_change_delay)
       *err += gc->slew_error;
   }
+
+  offset = gc->slew_freq * duration + fastslew_corr - gc->offset_register;
+  //TODO: what about fastslew_corr?
+  if (reverse)
+    offset = offset / (1.0 + gc->slew_freq);
+
+#if 0
+  if (!reverse) {
+    struct timespec cooked;
+    UTI_AddDoubleToTimespec(ts, offset, &cooked);
+
+    DEBUG_LOG("raw error: %+.9f %.9f", offset - get_offset(context, 1, &cooked, NULL), offset);
+  }
+#endif
+
+  return offset;
 }
 
 /* ================================================== */

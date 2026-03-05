@@ -50,8 +50,8 @@ typedef void (*clk_AccumulateOffset)(clk_DriverContext *context, double offset, 
 /* System driver to convert a raw time to an adjusted (cooked) time.
    The number of seconds returned in 'corr' have to be added to the
    raw time to get the corrected time */
-typedef void (*clk_GetOffset)(clk_DriverContext *context,
-                              struct timespec *raw, double *corr, double *err);
+typedef double (*clk_GetOffset)(clk_DriverContext *context, int reverse,
+                                struct timespec *ts, double *err);
 
 /* System driver to apply a step offset. A positive argument means step
    the clock forwards. */

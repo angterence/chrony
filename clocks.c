@@ -688,12 +688,12 @@ CLK_AccumulateFrequencyAndOffset(CLK_Instance inst, double dfreq, double doffset
 
 /* ================================================== */
 
-void
-CLK_GetOffset(CLK_Instance inst, struct timespec *raw, double *corr, double *err)
+double
+CLK_GetOffset(CLK_Instance inst, int reverse, struct timespec *ts, double *err)
 {
   BRIEF_ASSERT(inst->driver.get_offset);
 
-  inst->driver.get_offset(inst->driver.context, raw, corr, err);
+  return inst->driver.get_offset(inst->driver.context, reverse, ts, err);
 }
 
 /* ================================================== */
@@ -762,7 +762,7 @@ CLK_CookTime(CLK_Instance inst, struct timespec *raw, struct timespec *cooked, d
 {
   double offset;
 
-  CLK_GetOffset(inst, raw, &offset, err);
+  offset = CLK_GetOffset(inst, 0, raw, err);
   UTI_AddDoubleToTimespec(raw, offset, cooked);
 }
 

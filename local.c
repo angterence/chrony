@@ -352,7 +352,7 @@ void
 LCL_GetOffsetCorrection(struct timespec *raw, double *correction, double *err)
 {
   /* Call system specific driver to get correction */
-  CLK_GetOffset(local_clock, raw, correction, err);
+  *correction = CLK_GetOffset(local_clock, 0, raw, err);
 }
 
 /* ================================================== */

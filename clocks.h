@@ -71,7 +71,7 @@ extern double CLK_SetFrequency(CLK_Instance inst, double freq);
 extern double CLK_AccumulateFrequencyAndOffset(CLK_Instance inst, double dfreq,
                                                double offset, double corr_rate);
 
-extern void CLK_GetOffset(CLK_Instance inst, struct timespec *raw, double *corr, double *err);
+extern double CLK_GetOffset(CLK_Instance inst, int direction, struct timespec *ts, double *err);
 
 extern int CLK_ApplyStepOffset(CLK_Instance inst, double offset);
 

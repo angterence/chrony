@@ -111,23 +111,36 @@ apply_step_offset(clk_DriverContext *context, double offset)
 
 /* ================================================== */
 
-static void
-get_offset(clk_DriverContext *context, struct timespec *raw, double *corr, double *err)
+static double
+get_offset(clk_DriverContext *context, int reverse, struct timespec *ts, double *err)
 {
   struct null_context *nc = context;
-  double duration;
+  double duration, offset;
 
-  duration = UTI_DiffTimespecsToDouble(raw, &nc->last_update);
+  duration = UTI_DiffTimespecsToDouble(ts, &nc->last_update);
 
-  if (duration > MIN_UPDATE_INTERVAL) {
+  if (!reverse && duration > MIN_UPDATE_INTERVAL) {
     update_offset(nc);
     duration = 0.0;
   }
 
-  *corr = -1.0e-6 * nc->freq * duration - nc->offset_register;
-
   if (err)
     *err = 0.0;
+
+  offset = -1.0e-6 * nc->freq * duration - nc->offset_register;
+  if (reverse)
+    offset = offset / (1.0 - 1.0e-6 * nc->freq);
+
+#if 0
+  if (!reverse) {
+    struct timespec cooked;
+    UTI_AddDoubleToTimespec(ts, offset, &cooked);
+
+    DEBUG_LOG("raw error: %+.9f", offset - get_offset(context, 1, &cooked, NULL));
+  }
+#endif
+
+  return offset;
 }
 
 /* ================================================== */

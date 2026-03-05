@@ -168,7 +168,7 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
 {
   double delay, raw_delay, min_delay, low_delay, high_delay, e, pred_err;
   double delay_sum, hw_sum, local_sum, local_prec, freq;
-  int i, min_reading, combined;
+  int i, min_reading, under, over, combined;
   struct timespec ts1, ts2;
 
   if (n_readings < 1)
@@ -208,14 +208,20 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
                QNT_GetMinStep(clock->delay_quants) / 2.0;
   low_delay = MIN(low_delay, high_delay);
   high_delay = MAX(high_delay, low_delay + local_prec);
+  over = under = 0;
 
   /* Combine readings with delay in the expected interval */
   for (i = combined = 0, delay_sum = hw_sum = local_sum = 0.0; i < n_readings; i++) {
     raw_delay = UTI_DiffTimespecsToDouble(&tss[i][2], &tss[i][0]);
     delay = freq * raw_delay;
 
-    if (delay < low_delay || delay > high_delay)
+    if (delay < low_delay) {
+      under++;
       continue;
+    } else if (delay > high_delay) {
+      over++;
+      continue;
+    }
 
     delay_sum += delay;
     hw_sum += UTI_DiffTimespecsToDouble(&tss[i][1], &tss[0][1]);
@@ -223,7 +229,8 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
     combined++;
   }
 
-  DEBUG_LOG("Combined %d readings lo=%e hi=%e", combined, low_delay, high_delay);
+  DEBUG_LOG("Combined %d readings over=%d under=%d lo=%e hi=%e",
+            combined, over, under, low_delay, high_delay);
 
   if (combined > 0) {
     UTI_AddDoubleToTimespec(&tss[0][1], hw_sum / combined, hw_ts);
@@ -312,7 +319,7 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
      or the frequency is not sane, drop all samples and start again */
   if (fabs(clock->offset) > err ||
       fabs(clock->frequency - 1.0) > MAX_FREQ_OFFSET) {
-    DEBUG_LOG("HW clock reset");
+    DEBUG_LOG("HW clock reset offset=%e freq=%e", clock->offset, clock->frequency - 1.0);
     clock->n_samples = 0;
     clock->valid_coefs = 0;
   }

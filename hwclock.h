@@ -31,7 +31,7 @@
 typedef struct HCL_Instance_Record *HCL_Instance;
 
 /* Create a new HW clock instance */
-extern HCL_Instance HCL_CreateInstance(CLK_Instance local_clock,
+extern HCL_Instance HCL_CreateInstance(CLK_Instance hw_clock, CLK_Instance local_clock,
                                        int min_samples, int max_samples,
                                        double min_separation, double precision);
 
@@ -40,6 +40,9 @@ extern void HCL_DestroyInstance(HCL_Instance clock);
 
 extern void HCL_SlewLocal(HCL_Instance clock, struct timespec *cooked, double dfreq,
                           double doffset);
+
+extern void HCL_SlewHw(HCL_Instance clock, struct timespec *cooked, double dfreq,
+                       double doffset);
 
 /* Check if a new sample should be accumulated at this time */
 extern int HCL_NeedsNewSample(HCL_Instance clock, struct timespec *now);

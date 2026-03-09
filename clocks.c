@@ -598,6 +598,10 @@ handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double d
   CLK_Instance inst2;
   unsigned int i;
 
+  if (inst->hwclock) {
+    HCL_SlewHw(inst->hwclock, cooked, dfreq, doffset);
+  }
+
   for (i = 0; i < ARR_GetSize(clocks); i++) {
     inst2 = get_record(i);
     if (inst2->hwclock_reference != inst)
@@ -794,7 +798,7 @@ poll_phc(CLK_Instance inst, struct timespec *now)
   inst->in_poll = 1;
 
   if (!inst->hwclock)
-    inst->hwclock = HCL_CreateInstance(inst->hwclock_reference,
+    inst->hwclock = HCL_CreateInstance(inst, inst->hwclock_reference,
                                        inst->min_samples, inst->max_samples,
                                        UTI_Log2ToDouble(inst->minpoll),
                                        CLK_GetPrecision(inst));

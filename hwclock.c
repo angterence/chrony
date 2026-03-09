@@ -53,6 +53,7 @@
 #define DELAY_QUANT_MIN_STEP 1.0e-9
 
 struct HCL_Instance_Record {
+  CLK_Instance hw_clock;
   CLK_Instance local_clock;
 
   /* HW and local reference timestamp */
@@ -104,9 +105,27 @@ HCL_SlewLocal(HCL_Instance clock, struct timespec *cooked, double dfreq, double 
 
 /* ================================================== */
 
+void
+HCL_SlewHw(HCL_Instance clock, struct timespec *cooked, double dfreq, double doffset)
+{
+  double delta;
+
+  DEBUG_LOG("dfreq=%e doffset=%e freq=%e offset=%e", dfreq, doffset,
+            clock->valid_coefs ? clock->frequency - 1.0 : 0.0,
+            clock->valid_coefs ? clock->offset : 0.0);
+
+  //TODO: is this correct?
+  if (clock->n_samples)
+    UTI_AdjustTimespec(&clock->hw_ref, cooked, &clock->hw_ref, &delta, dfreq, doffset);
+  if (clock->valid_coefs)
+    clock->frequency *= 1.0 - dfreq;
+}
+
+/* ================================================== */
+
 HCL_Instance
-HCL_CreateInstance(CLK_Instance local_clock, int min_samples, int max_samples,
-                   double min_separation, double precision)
+HCL_CreateInstance(CLK_Instance hw_clock, CLK_Instance local_clock, int min_samples,
+                   int max_samples, double min_separation, double precision)
 {
   HCL_Instance clock;
 
@@ -115,6 +134,7 @@ HCL_CreateInstance(CLK_Instance local_clock, int min_samples, int max_samples,
   max_samples = MAX(min_samples, max_samples);
 
   clock = MallocNew(struct HCL_Instance_Record);
+  clock->hw_clock = hw_clock;
   clock->local_clock = local_clock;
   clock->x_data = MallocArray(double, max_samples);
   clock->y_data = MallocArray(double, max_samples);
@@ -265,9 +285,10 @@ void
 HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
                      struct timespec *local_ts, double err)
 {
-  double hw_delta, local_delta, local_freq, raw_freq;
+  double hw_delta, local_delta, hw_freq, local_freq, raw_freq;
   int i, n_runs, best_start;
 
+  hw_freq = 1.0 - CLK_GetFrequency(clock->hw_clock) / 1.0e6;
   local_freq = 1.0 - CLK_GetFrequency(clock->local_clock) / 1.0e6;
 
   /* Shift old samples */
@@ -275,7 +296,7 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
     if (clock->n_samples >= clock->max_samples)
       clock->n_samples--;
 
-    hw_delta = UTI_DiffTimespecsToDouble(hw_ts, &clock->hw_ref);
+    hw_delta = UTI_DiffTimespecsToDouble(hw_ts, &clock->hw_ref) / hw_freq;
     local_delta = UTI_DiffTimespecsToDouble(local_ts, &clock->local_ref) / local_freq;
 
     if (hw_delta <= 0.0 || local_delta < clock->min_separation / 2.0) {
@@ -306,7 +327,7 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
     return;
   }
 
-  clock->frequency = raw_freq / local_freq;
+  clock->frequency = raw_freq / local_freq * hw_freq;
 
   /* Drop unneeded samples */
   if (clock->n_samples > clock->min_samples)

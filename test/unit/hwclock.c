@@ -41,7 +41,8 @@ test_unit(void)
   CLK_Initialise(0);
 
   for (i = 1; i <= 8; i++) {
-    clock = HCL_CreateInstance(CLK_GetMainClock(), random() % (1 << i), 1 << i, 1.0, 1e-9);
+    clock = HCL_CreateInstance(CLK_GetMainClock(), CLK_GetMainClock(),
+                               random() % (1 << i), 1 << i, 1.0, 1e-9);
 
     for (j = 0, count = 0, sum = 0.0; j < 100; j++) {
       UTI_ZeroTimespec(&start_hw_ts);

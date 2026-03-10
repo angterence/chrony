@@ -54,6 +54,7 @@ static double temp_comp_ppm;
 /* ================================================== */
 
 static CLK_Instance local_clock;
+static CLK_Instance shadow_clock;
 
 /* ================================================== */
 
@@ -104,6 +105,7 @@ LCL_Initialise(void)
   temp_comp_ppm = 0.0;
 
   local_clock = CLK_GetMainClock();
+  shadow_clock = CLK_GetShadowClock();
 
   current_freq_ppm = CLK_GetFrequency(local_clock);
 
@@ -321,7 +323,14 @@ LCL_GetLocalClock(void)
 void
 LCL_ReadRawTime(struct timespec *ts)
 {
-  CLK_ReadTime(local_clock, ts);
+  struct timespec fast_ts;
+
+  CLK_ReadTime(shadow_clock, &fast_ts);
+
+  if (!CLK_ConvertTime(shadow_clock, 0, &fast_ts, local_clock, 0, ts, NULL)) {
+    DEBUG_LOG("Falling back to direct read of %s", CLK_GetName(local_clock));
+    CLK_ReadTime(local_clock, ts);
+  }
 }
 
 /* ================================================== */

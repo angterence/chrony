@@ -41,6 +41,8 @@ extern int CLK_IsAnyControlled(void);
 
 extern CLK_Instance CLK_GetMainClock(void);
 
+extern CLK_Instance CLK_GetShadowClock(void);
+
 /* name is CLOCK_REALTIME, CLOCK_MONOTONIC, /dev/ptp*, interface name */
 extern CLK_Instance CLK_Open(const char *name, int control);
 

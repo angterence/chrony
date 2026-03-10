@@ -93,6 +93,7 @@ static int control_allowed;
 static ARR_Instance clocks;
 
 static CLK_Instance main_clock;
+static CLK_Instance shadow_clock;
 
 /* ================================================== */
 
@@ -315,6 +316,7 @@ CLK_Initialise(int control)
   main_clock = CLK_Open("SYS:REALTIME", 1);
   if (!main_clock)
     LOG_FATAL("Could not open main clock");
+  shadow_clock = main_clock;
 }
 
 /* ================================================== */
@@ -322,6 +324,8 @@ CLK_Initialise(int control)
 void
 CLK_Finalise(void)
 {
+  if (main_clock != shadow_clock)
+    CLK_Close(shadow_clock);
   CLK_Close(main_clock);
 
   BRIEF_ASSERT(ARR_GetSize(clocks) == 0);
@@ -349,6 +353,14 @@ CLK_Instance
 CLK_GetMainClock(void)
 {
   return main_clock;
+}
+
+/* ================================================== */
+
+CLK_Instance
+CLK_GetShadowClock(void)
+{
+  return shadow_clock;
 }
 
 /* ================================================== */

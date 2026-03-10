@@ -769,6 +769,17 @@ CLK_CookTime(CLK_Instance inst, struct timespec *raw, struct timespec *cooked, d
 /* ================================================== */
 
 static void
+uncook_time(CLK_Instance inst, struct timespec *cooked, struct timespec *raw, double *err)
+{
+  double offset;
+
+  offset = CLK_GetOffset(inst, 1, cooked, err);
+  UTI_AddDoubleToTimespec(cooked, -offset, raw);
+}
+
+/* ================================================== */
+
+static void
 poll_timeout(void *arg)
 {
   CLK_Instance inst = arg;
@@ -897,6 +908,38 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
       err3 = 0.0;
     } else {
       assert(0);
+    }
+
+    if (err)
+      *err = err1 + err2 + err3;
+
+    return 1;
+  }
+
+  if (from->system && !to->system) {
+    if (!to->hwclock_reference)
+      to->hwclock_reference = from;
+    if (to->hwclock_reference != from)
+      LOG_FATAL("Conflict");
+
+    if (!poll_phc(to, NULL))
+      return 0;
+
+    if (from_cooked) {
+      ts1 = *from_ts;
+      err1 = 0.0;
+    } else {
+      CLK_CookTime(from, from_ts, &ts1, &err1);
+    }
+
+    if (!HCL_UncookTime(to->hwclock, &ts1, &ts2, &err2))
+      return 0;
+
+    if (to_cooked) {
+      *to_ts = ts2;
+      err3 = 0.0;
+    } else {
+      uncook_time(to, &ts2, to_ts, &err3);
     }
 
     if (err)

@@ -1614,6 +1614,7 @@ parse_hwtimestamp(char *line)
   CNF_HwTsInterface *iface;
   int n, maxpoll_set = 0;
   char *p, filter[5];
+  double d;
 
   if (!*line) {
     command_parse_error();
@@ -1630,7 +1631,6 @@ parse_hwtimestamp(char *line)
   iface->max_samples = 16;
   iface->nocrossts = 0;
   iface->rxfilter = CNF_HWTS_RXFILTER_ANY;
-  iface->precision = 100.0e-9;
   iface->tx_comp = 0.0;
   iface->rx_comp = 0.0;
 
@@ -1651,7 +1651,8 @@ parse_hwtimestamp(char *line)
       if (!SSCANF_IN_RANGE(line, "%d%n", &iface->min_samples, &n, 0, INT_MAX))
         break;
     } else if (!strcasecmp(p, "precision")) {
-      if (sscanf(line, "%lf%n", &iface->precision, &n) != 1)
+      /* Ignored */
+      if (sscanf(line, "%lf%n", &d, &n) != 1)
         break;
     } else if (!strcasecmp(p, "rxcomp")) {
       if (sscanf(line, "%lf%n", &iface->rx_comp, &n) != 1)

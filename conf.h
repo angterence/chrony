@@ -155,7 +155,6 @@ typedef struct {
   int max_samples;
   int nocrossts;
   CNF_HwTs_RxFilter rxfilter;
-  double precision;
   double tx_comp;
   double rx_comp;
 } CNF_HwTsInterface;

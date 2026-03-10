@@ -367,3 +367,26 @@ HCL_CookTime(HCL_Instance clock, struct timespec *raw, struct timespec *cooked, 
 
   return 1;
 }
+
+/* ================================================== */
+
+int
+HCL_UncookTime(HCL_Instance clock, struct timespec *cooked, struct timespec *raw, double *err)
+{
+  double offset, elapsed;
+
+  if (!clock->valid_coefs)
+    return 0;
+
+  //raw = (cooked + clock->offset - local_ref) * clock->frequency + hw_ref;
+
+  elapsed = UTI_DiffTimespecsToDouble(cooked, &clock->local_ref);
+  offset = (elapsed + clock->offset) * clock->frequency;
+  UTI_AddDoubleToTimespec(&clock->hw_ref, offset, raw);
+
+  /* Fow now, just return the error of the last sample */
+  if (err)
+    *err = clock->last_err;
+
+  return 1;
+}

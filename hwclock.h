@@ -64,4 +64,8 @@ extern void HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
 extern int HCL_CookTime(HCL_Instance clock, struct timespec *raw, struct timespec *cooked,
                         double *err);
 
+/* Convert cooked local time to raw time */
+extern int HCL_UncookTime(HCL_Instance clock, struct timespec *cooked, struct timespec *raw,
+                          double *err);
+
 #endif

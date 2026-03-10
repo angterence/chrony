@@ -170,6 +170,14 @@ SCH_Finalise(void) {
 
 /* ================================================== */
 
+int
+SCH_IsInitialised(void)
+{
+  return initialised;
+}
+
+/* ================================================== */
+
 void
 SCH_AddFileHandler
 (int fd, int events, SCH_FileHandler handler, SCH_ArbitraryArgument arg)

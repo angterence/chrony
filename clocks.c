@@ -32,6 +32,7 @@
 #include "array.h"
 #include "clocks.h"
 #include "clocks_priv.h"
+#include "conf.h"
 #include "hwclock.h"
 #include "local.h"
 #include "logging.h"
@@ -50,6 +51,8 @@
 #define MIN_PHC_POLL -6
 #define MAX_PHC_POLL 20
 
+#define NSEC_PER_SEC 1000000000
+
 struct CLK_Instance_Record {
   char *name;
   clockid_t id;
@@ -61,6 +64,7 @@ struct CLK_Instance_Record {
 
   struct clk_Driver driver;
 
+  double precision;
   double frequency;
 
   int minpoll;
@@ -80,6 +84,203 @@ static int control_allowed;
 static ARR_Instance clocks;
 
 static CLK_Instance main_clock;
+
+/* ================================================== */
+
+/* Ask the system for the resolution of the system clock.  The Linux
+   clock_getres() is not usable, because it reports the internal timer
+   resolution, which is 1 ns when high-resolution timers are enabled,
+   even when using a lower-resolution clocksource. */
+
+static int
+get_resolution(CLK_Instance inst)
+{
+#ifndef LINUX
+  struct timespec res;
+
+  if (clock_getres(CLK_GetId(inst), &res) < 0)
+    return 0;
+
+  return NSEC_PER_SEC * res.tv_sec + res.tv_nsec;
+#else
+  return 0;
+#endif
+}
+
+/* ================================================== */
+
+#if defined(LINUX) && defined(CLOCK_MONOTONIC_RAW)
+
+static int
+compare_ints(const void *a, const void *b)
+{
+  return *(const int *)a - *(const int *)b;
+}
+
+#define READINGS 64
+
+/* On Linux, try to measure the actual resolution of the system clock by
+   performing a varying amount of busy work between clock readings and finding
+   the minimum change in the measured interval.  Require a change of at least
+   two nanoseconds to ignore errors caused by conversion to timespec.  If
+   measuring a system clock, use the raw monotonic clock to avoid the impact of
+   potential frequency changes due to NTP adjustments made by other processes,
+   and the kernel dithering of the 32-bit multiplier. */
+
+static int
+measure_resolution(CLK_Instance inst)
+{
+  int i, j, b, busy, diffs[READINGS - 1], diff2, min;
+  struct timespec start_ts, ts[READINGS];
+  uint32_t acc;
+  clockid_t id;
+
+  if (CLK_IsSystem(inst))
+    id = CLOCK_MONOTONIC_RAW;
+  else
+    id = CLK_GetId(inst);
+
+  if (clock_gettime(id, &start_ts) < 0)
+    return 0;
+
+  for (acc = 0, busy = 1; busy < 100000; busy = busy * 3 / 2 + 1) {
+    for (i = 0, b = busy * READINGS; i < READINGS; i++, b -= busy) {
+      if (clock_gettime(id, &ts[i]) < 0)
+        return 0;
+
+      for (j = b; j > 0; j--)
+        acc += (acc & 1) + (uint32_t)ts[i].tv_nsec;
+    }
+
+    /* Give up after 0.1 seconds */
+    if (UTI_DiffTimespecsToDouble(&ts[READINGS - 1], &start_ts) > 0.1) {
+      DEBUG_LOG("Measurement too slow");
+      return 0;
+    }
+
+    for (i = 0; i < READINGS - 1; i++) {
+      diffs[i] = NSEC_PER_SEC * (ts[i + 1].tv_sec - ts[i].tv_sec) +
+                 (ts[i + 1].tv_nsec - ts[i].tv_nsec);
+
+      /* Make sure the differences are sane.  A resolution larger than the
+         reading time will be measured in measure_clock_read_delay(). */
+      if (diffs[i] <= 0 || diffs[i] > NSEC_PER_SEC)
+        return 0;
+    }
+
+    /* Sort the differences and keep values unique within 1 ns from the
+       first half of the array, which are less likely to be impacted by CPU
+       interruptions */
+    qsort(diffs, READINGS - 1, sizeof (diffs[0]), compare_ints);
+    for (i = 1, j = 0; i < READINGS / 2; i++) {
+      if (diffs[j] + 1 < diffs[i])
+        diffs[++j] = diffs[i];
+    }
+    j++;
+
+#if 0
+    for (i = 0; i < j; i++)
+      DEBUG_LOG("busy %d diff %d %d", busy, i, diffs[i]);
+#endif
+
+    /* Require at least three unique differences to be more confident
+       with the result */
+    if (j < 3)
+      continue;
+
+    /* Find the smallest difference between the unique differences */
+    for (i = 1, min = 0; i < j; i++) {
+      diff2 = diffs[i] - diffs[i - 1];
+      if (min == 0 || min > diff2)
+        min = diff2;
+    }
+
+    if (min == 0)
+      continue;
+
+    /* Prevent the compiler from optimising the busy work out */
+    if (acc == 0)
+      min += 1;
+
+    return min;
+  }
+
+  return 0;
+}
+
+#else
+static int
+measure_clock_resolution(void)
+{
+  return 0;
+}
+#endif
+
+/* ================================================== */
+
+/* As a fallback, measure how long it takes to read the clock.  It
+   typically takes longer than the resolution of the clock (and it
+   depends on the CPU speed), i.e. every reading gives a different
+   value, but handle also low-resolution clocks that might give
+   the same reading multiple times. */
+
+/* Define the number of increments of the system clock that we want
+   to see to be fairly sure that we've got something approaching
+   the minimum increment.  Even on a crummy implementation that can't
+   interpolate between 10ms ticks, we should get this done in
+   under 1s of busy waiting. */
+#define NITERS 100
+
+static int
+measure_read_delay(CLK_Instance inst)
+{
+  struct timespec ts, old_ts;
+  int iters, diff, best;
+
+  CLK_ReadTime(inst, &old_ts);
+
+  /* Assume we must be better than a second */
+  best = NSEC_PER_SEC;
+  iters = 0;
+
+  do {
+    CLK_ReadTime(inst, &ts);
+
+    diff = NSEC_PER_SEC * (ts.tv_sec - old_ts.tv_sec) + (ts.tv_nsec - old_ts.tv_nsec);
+
+    old_ts = ts;
+    if (diff > 0) {
+      if (diff < best)
+        best = diff;
+      iters++;
+    }
+  } while (iters < NITERS);
+
+  assert(best > 0);
+
+  return best;
+}
+
+/* ================================================== */
+
+static double
+measure_precision(CLK_Instance inst)
+{
+  int res, delay, prec;
+
+  res = get_resolution(inst);
+  if (res <= 0)
+    res = measure_resolution(inst);
+
+  delay = measure_read_delay(inst);
+
+  if (res > 0)
+    prec = MIN(res, delay);
+  else
+    prec = delay;
+
+  return prec / 1.0e9;
+}
 
 /* ================================================== */
 
@@ -232,6 +433,17 @@ CLK_Open(const char *name, int control)
 
   ARR_AppendElement(clocks, &inst);
 
+  //TODO: apply to any main clock?
+  if (inst->system)
+    inst->precision = CNF_GetClockPrecision();
+  else
+    inst->precision = 100e-9; //hwtimestamp default
+    //inst->precision = 0.0;
+  if (inst->precision <= 0.0)
+    inst->precision = measure_precision(inst);
+  inst->precision = CLAMP(1.0e-9, inst->precision, 1.0);
+  DEBUG_LOG("%s precision %.9f", inst->name, inst->precision);
+
   BRIEF_ASSERT(inst->driver.read_frequency);
   inst->frequency = inst->driver.read_frequency(inst->driver.context);
 
@@ -333,11 +545,7 @@ CLK_IsSystem(CLK_Instance inst)
 double
 CLK_GetPrecision(CLK_Instance inst)
 {
-  //TODO
-  if (inst->system)
-    return 2e-9;
-  else
-    return 100e-9;
+  return inst->precision;
 }
 
 /* ================================================== */

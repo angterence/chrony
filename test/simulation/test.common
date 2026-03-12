@@ -489,6 +489,7 @@ run_test() {
 
 	export CLKNETSIM_IP_FAMILY=$ip_family
 	export CLKNETSIM_UNIX_SUBNET=$[$cmdmon_unix != 0 ? 2 : 0]
+	export CLKNETSIM_START_MONO=$RANDOM
 
 	for i in $(seq 1 $nodes); do
 		echo "node${i}_shift_pll = $shift_pll"

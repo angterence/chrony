@@ -79,10 +79,12 @@ default_max_sync_time=210
 default_client_min_mean_out_interval=0.0
 default_client_max_min_out_interval=inf
 
+default_clocks="REALTIME"
 default_ip_family=4
 default_cmdmon_unix=1
 default_pcap_dumps=0
 default_dns=0
+default_extra_clknetsim_conf=""
 
 # Initialize test settings from their defaults
 for defoptname in ${!default_*}; do
@@ -166,7 +168,7 @@ test_message() {
 }
 
 get_wander_expr() {
-	local scaled_wander
+	local freq_offset=$1 wander=$2 scaled_wander
 
 	scaled_wander=$(awk "BEGIN {print $wander / \
 		sqrt($update_interval < 0 ? 2^-($update_interval) : 1)}")
@@ -205,6 +207,14 @@ get_node_name() {
 		printf "fc00::123:%x" $index
 	else
 		echo "192.168.123.$index"
+	fi
+}
+
+get_node_clocks() {
+	if [ -z "$clocks" ]; then
+		echo 1
+	else
+		echo ",$clocks" | tr -dc , | wc -c
 	fi
 }
 
@@ -250,13 +260,23 @@ check_config_h() {
 
 # Check if the clock was well synchronized
 check_sync() {
+	local node_list=$1 clock_list=$2 node clock node_clocks
 	local i msg sync_time max_time_error max_freq_error r ret=0
 	local rms_time_error rms_freq_error
 
 	test_message 2 1 "checking clock sync time, max/rms time/freq error:"
 
-	for i in $(seq 1 $(get_chronyd_nodes)); do
-		[ $i -gt $[$servers * $server_strata] ] || continue
+	node_clocks=$(get_node_clocks)
+	[ -z "$node_list" ] &&
+		node_list=$(seq $[$servers * $server_strata + 1] $(get_chronyd_nodes))
+	[ -z "$clock_list" ] && clock_list="1"
+
+	for i in $(seq 1 $[$(get_chronyd_nodes) * $node_clocks]); do
+		node=$[($i - 1) / $node_clocks + 1]
+		clock=$[($i - 1) % $node_clocks + 1]
+
+		[[ " $node_list " =~ [^0-9]$node[^0-9] ]] || continue
+		[[ " $clock_list " =~ [^0-9]$clock[^0-9] ]] || continue
 
 		sync_time=$(find_sync tmp/log.offset tmp/log.freq $i \
 			$time_max_limit $freq_max_limit 1.0)
@@ -292,7 +312,11 @@ check_sync() {
 			r=1
 		fi
 
-		test_message 3 0 "node $i: $msg"
+		if [ $node_clocks -eq 1 ]; then
+			test_message 3 0 "node $node: $msg"
+		else
+			test_message 3 0 "node $node:$clock: $msg"
+		fi
 
 		[ $r -eq 0 ] || ret=1
 		[ $r -eq 0 ] && test_ok || test_bad
@@ -470,6 +494,7 @@ run_simulation() {
 
 	start_server $nodes \
 		-n 2 \
+		-c $(get_node_clocks) \
 		-o tmp/log.offset -f tmp/log.freq -p tmp/log.packets \
 		-R $(awk "BEGIN {print $update_interval < 0 ? 2^-($update_interval) : 1}") \
 		-r $(awk "BEGIN {print $max_sync_time * 2^$update_interval}") \
@@ -487,6 +512,7 @@ run_test() {
 	nodes=$(get_chronyd_nodes)
 	[ -n "$chronyc_conf" ] && nodes=$[$nodes + $clients]
 
+	export CLKNETSIM_CLOCKS=$clocks
 	export CLKNETSIM_IP_FAMILY=$ip_family
 	export CLKNETSIM_UNIX_SUBNET=$[$cmdmon_unix != 0 ? 2 : 0]
 	export CLKNETSIM_START_MONO=$RANDOM
@@ -523,24 +549,24 @@ run_test() {
 			elif [ $stratum -le $server_strata ]; then
 				step=$server_step
 				start=$server_start
-				freq=$(get_wander_expr)
+				freq=$(get_wander_expr "$freq_offset" "$wander")
 				offset=0.0
 				options=$server_chronyd_options
 			else
 				step=$client_step
 				start=$client_start
-				freq=$(get_wander_expr)
+				freq=$(get_wander_expr "$freq_offset" "$wander")
 				offset=$time_offset
 				options=$client_chronyd_options
 			fi
 
 			conf=$(get_chronyd_conf $stratum $i $n)
 
-			[ -z "$freq" ] || echo "node${node}_freq = $freq" >> tmp/conf
-			[ -z "$step" ] || echo "node${node}_step = $step" >> tmp/conf
+			[ -z "$offset" ] || echo "node${node}_offset1 = $offset" >> tmp/conf
+			[ -z "$freq" ] || echo "node${node}_freq1 = $freq" >> tmp/conf
+			[ -z "$step" ] || echo "node${node}_step1 = $step" >> tmp/conf
 			[ -z "$refclock_jitter" ] || \
 				echo "node${node}_refclock = $(get_refclock_expr)" >> tmp/conf
-			echo "node${node}_offset = $offset" >> tmp/conf
 			echo "node${node}_start = $start" >> tmp/conf
 			start_client $node chronyd "$conf" "" "$options" && \
 				test_ok || test_error
@@ -569,6 +595,8 @@ run_test() {
 		[ $? -ne 0 ] && return 1
 		node=$[$node + 1]
 	done
+
+	echo "$extra_clknetsim_conf" >> tmp/conf
 
 	run_simulation $nodes
 }

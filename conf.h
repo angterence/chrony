@@ -139,6 +139,21 @@ extern char *CNF_GetHwclockFile(void);
 extern int CNF_GetInitSources(void);
 extern double CNF_GetInitStepThreshold(void);
 
+typedef struct {
+  char *name;
+  int main;
+  int shadow;
+  int free;
+  int nocrossts;
+  int minpoll;
+  int maxpoll;
+  int min_samples;
+  int max_samples;
+  double precision;
+} CNF_Clock;
+
+extern ARR_Instance CNF_GetClocks(void);
+
 typedef enum {
   CNF_HWTS_RXFILTER_ANY,
   CNF_HWTS_RXFILTER_NONE,

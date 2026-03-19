@@ -72,6 +72,7 @@ static void parse_clientloglimit(char *);
 static void parse_confdir(char *);
 static void parse_driftfile(char *);
 static void parse_fallbackdrift(char *);
+static void parse_clock(char *);
 static void parse_hwtimestamp(char *);
 static void parse_include(char *);
 static void parse_initstepslew(char *);
@@ -294,6 +295,9 @@ static int no_cert_time_check = 0;
 /* Flag disabling use of system trusted certificates */
 static int no_system_cert = 0;
 
+/* Array of CNF_Clock */
+static ARR_Instance clocks;
+
 /* Array of CNF_HwTsInterface */
 static ARR_Instance hwts_interfaces;
 
@@ -431,6 +435,8 @@ CNF_Initialise(int r, int client_only)
 
   restarted = r;
 
+  clocks = ARR_CreateInstance(sizeof (CNF_Clock));
+
   hwts_interfaces = ARR_CreateInstance(sizeof (CNF_HwTsInterface));
 
   init_sources = ARR_CreateInstance(sizeof (IPAddr));
@@ -479,6 +485,10 @@ void
 CNF_Finalise(void)
 {
   unsigned int i;
+
+  for (i = 0; i < ARR_GetSize(clocks); i++)
+    Free(((CNF_Clock *)ARR_GetElement(clocks, i))->name);
+  ARR_DestroyInstance(clocks);
 
   for (i = 0; i < ARR_GetSize(hwts_interfaces); i++)
     Free(((CNF_HwTsInterface *)ARR_GetElement(hwts_interfaces, i))->name);
@@ -626,6 +636,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_broadcast(p);
   } else if (!strcasecmp(command, "clientloglimit")) {
     parse_clientloglimit(p);
+  } else if (!strcasecmp(command, "clock")) {
+    parse_clock(p);
   } else if (!strcasecmp(command, "clockprecision")) {
     parse_double(p, &clock_precision);
   } else if (!strcasecmp(command, "cmdallow")) {
@@ -1604,6 +1616,74 @@ parse_tempcomp(char *line)
 
   Free(tempcomp_sensor_file);
   tempcomp_sensor_file = Strdup(p);
+}
+
+/* ================================================== */
+
+static void
+parse_clock(char *line)
+{
+  CNF_Clock *clock;
+  char *p;
+  int n;
+
+  if (!*line) {
+    command_parse_error();
+    return;
+  }
+
+  p = line;
+  line = CPS_SplitWord(line);
+
+  clock = ARR_GetNewElement(clocks);
+  clock->name = Strdup(p);
+  clock->main = 0;
+  clock->shadow = 0;
+  clock->free = 0;
+  clock->nocrossts = 0;
+  clock->minpoll = 0;
+  clock->maxpoll = 1;
+  clock->min_samples = 2;
+  clock->max_samples = 16;
+  clock->precision = 0.0;
+
+  for (p = line; *p; line += n, p = line) {
+    line = CPS_SplitWord(line);
+
+    if (!strcasecmp(p, "free")) {
+      n = 0;
+      clock->free = 1;
+    } else if (!strcasecmp(p, "main")) {
+      n = 0;
+      clock->main = 1;
+    } else if (!strcasecmp(p, "maxpoll")) {
+      if (!SSCANF_IN_RANGE(line, "%d%n", &clock->maxpoll, &n, -32, 32))
+        break;
+    } else if (!strcasecmp(p, "maxsamples")) {
+      if (!SSCANF_IN_RANGE(line, "%d%n", &clock->max_samples, &n, 0, INT_MAX))
+        break;
+    } else if (!strcasecmp(p, "minpoll")) {
+      if (!SSCANF_IN_RANGE(line, "%d%n", &clock->minpoll, &n, -32, 32))
+        break;
+    } else if (!strcasecmp(p, "minsamples")) {
+      if (!SSCANF_IN_RANGE(line, "%d%n", &clock->min_samples, &n, 0, INT_MAX))
+        break;
+    } else if (!strcasecmp(p, "nocrossts")) {
+      n = 0;
+      clock->nocrossts = 1;
+    } else if (!strcasecmp(p, "precision")) {
+      if (sscanf(line, "%lf%n", &clock->precision, &n) != 1)
+        break;
+    } else if (!strcasecmp(p, "shadow")) {
+      n = 0;
+      clock->shadow = 1;
+    } else {
+      break;
+    }
+  }
+
+  if (*p)
+    command_parse_error();
 }
 
 /* ================================================== */
@@ -2765,6 +2845,14 @@ double
 CNF_GetInitStepThreshold(void)
 {
   return init_slew_threshold;
+}
+
+/* ================================================== */
+
+ARR_Instance
+CNF_GetClocks(void)
+{
+  return clocks;
 }
 
 /* ================================================== */

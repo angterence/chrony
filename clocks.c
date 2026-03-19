@@ -309,14 +309,49 @@ get_record(unsigned int index)
 void
 CLK_Initialise(int control)
 {
-  control_allowed = control;
+  ARR_Instance conf_clocks;
+  CLK_Instance clock;
+  CNF_Clock *conf;
+  unsigned int i;
 
+  control_allowed = control;
+  main_clock = shadow_clock = NULL;
   clocks = ARR_CreateInstance(sizeof (CLK_Instance));
 
-  main_clock = CLK_Open("SYS:REALTIME", 1);
-  if (!main_clock)
-    LOG_FATAL("Could not open main clock");
-  shadow_clock = main_clock;
+  conf_clocks = CNF_GetClocks();
+
+  for (i = 0; i < ARR_GetSize(conf_clocks); i++) {
+    conf = ARR_GetElement(conf_clocks, i);
+    clock = CLK_Open(conf->name, !conf->free);
+    if (!clock)
+      LOG_FATAL("Could not open clock");
+
+    if (conf->main)
+      main_clock = clock;
+    if (conf->shadow)
+      shadow_clock = clock;
+
+    CLK_SetPoll(clock, conf->minpoll, conf->maxpoll);
+    CLK_SetSamples(clock, conf->min_samples, conf->max_samples);
+    if (conf->nocrossts)
+      CLK_DisableCrossTimestamping(clock);
+  }
+
+  if (!main_clock) {
+    main_clock = CLK_Open("SYS:REALTIME", 1);
+    if (!main_clock)
+      LOG_FATAL("Could not open clock");
+  }
+
+  if (!shadow_clock) {
+    if (CLK_IsSystem(main_clock)) {
+      shadow_clock = main_clock;
+    } else {
+      shadow_clock = CLK_Open("SYS:REALTIME", 0);
+      if (!shadow_clock)
+        LOG_FATAL("Could not open clock");
+    }
+  }
 }
 
 /* ================================================== */

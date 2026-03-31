@@ -68,4 +68,6 @@ extern int HCL_CookTime(HCL_Instance clock, struct timespec *raw, struct timespe
 extern int HCL_UncookTime(HCL_Instance clock, struct timespec *cooked, struct timespec *raw,
                           double *err);
 
+extern int HCL_GetFrequency(HCL_Instance clock, double *freq);
+
 #endif

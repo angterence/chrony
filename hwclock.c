@@ -390,3 +390,15 @@ HCL_UncookTime(HCL_Instance clock, struct timespec *cooked, struct timespec *raw
 
   return 1;
 }
+
+/* ================================================== */
+
+int
+HCL_GetFrequency(HCL_Instance clock, double *freq)
+{
+  if (!clock->valid_coefs)
+    return 0;
+
+  *freq = 1.0e6 * (clock->frequency - 1.0);
+  return 1;
+}

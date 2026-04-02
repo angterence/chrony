@@ -49,12 +49,11 @@ struct phc_instance {
   int fd;
   int dev_index;
   int mode;
-  int nocrossts;
   int extpps;
   int pin;
   int channel;
   struct timespec last_extts;
-  HCL_Instance clock;
+  CLK_Instance clock;
 };
 
 /* Array of RCL_Instance with enabled extpps */
@@ -76,13 +75,20 @@ static int phc_initialise(RCL_Instance instance)
  
   phc = MallocNew(struct phc_instance);
   phc->mode = 0;
-  phc->nocrossts = RCL_GetDriverOption(instance, "nocrossts") ? 1 : 0;
   phc->extpps = RCL_GetDriverOption(instance, "extpps") ? 1 : 0;
   UTI_ZeroTimespec(&phc->last_extts);
 
-  phc->fd = SYS_Linux_OpenPHC(path, phc->extpps ? O_RDWR : O_RDONLY);
-  if (phc->fd < 0)
+  //TODO: open O_RDWR but w/o clock control if phc->extpps.
+  //TODO: what about different instances using different configuration?
+  phc->clock = CLK_Open(path, 0);
+  if (!phc->clock)
     goto error;
+  CLK_SetPoll(phc->clock, RCL_GetDriverPoll(instance) - 1, RCL_GetDriverPoll(instance));
+  if (RCL_GetDriverOption(instance, "nocrossts"))
+    CLK_DisableCrossTimestamping(phc->clock);
+  //TODO: override precision with RCL_GetPrecision(instance))?
+
+  phc->fd = CLK_GetFd(phc->clock);
 
   if (fstat(phc->fd, &st) < 0 || !S_ISCHR(st.st_mode)) {
     LOG(LOGS_ERR, "Could not get PHC index");
@@ -111,11 +117,6 @@ static int phc_initialise(RCL_Instance instance)
   } else {
     phc->pin = phc->channel = 0;
   }
-
-  //TODO add slewing and provide correct HW clock, or switch fully to CLK
-  phc->clock = HCL_CreateInstance(LCL_GetLocalClock(), LCL_GetLocalClock(),
-                                  0, 16, UTI_Log2ToDouble(RCL_GetDriverPoll(instance)),
-                                  RCL_GetPrecision(instance));
 
   RCL_SetDriverData(instance, phc);
   return 1;
@@ -148,8 +149,7 @@ static void phc_finalise(RCL_Instance instance)
     }
   }
 
-  HCL_DestroyInstance(phc->clock);
-  close(phc->fd);
+  CLK_Close(phc->clock);
   Free(phc);
 }
 
@@ -167,7 +167,7 @@ static void process_ext_pulse(RCL_Instance instance, struct timespec *phc_ts)
   }
   phc->last_extts = *phc_ts;
 
-  if (!HCL_CookTime(phc->clock, phc_ts, &local_ts, &local_err))
+  if (!CLK_ConvertTime(phc->clock, 0, phc_ts, LCL_GetLocalClock(), 1, &local_ts, &local_err))
     return;
 
   RCL_AddCookedPulse(instance, &local_ts, 1.0e-9 * local_ts.tv_nsec, local_err,
@@ -205,25 +205,16 @@ static void read_ext_pulse(int fd, int event, void *anything)
 
 static int phc_poll(RCL_Instance instance)
 {
-  struct timespec phc_ts, sys_ts, local_ts, readings[PHC_READINGS][3];
+  struct timespec phc_ts, sys_ts;
   struct phc_instance *phc;
-  double phc_err, local_err;
-  int n_readings, quality;
+  double phc_err;
+  int quality;
 
   phc = (struct phc_instance *)RCL_GetDriverData(instance);
 
-  n_readings = SYS_Linux_GetPHCReadings(phc->fd, CLOCK_REALTIME, phc->nocrossts, &phc->mode,
-                                        PHC_READINGS, readings);
-  if (n_readings < 1)
+  if (!CLK_ReadTimePair(LCL_GetLocalClock(), phc->clock, &sys_ts,
+                        &phc_ts, &phc_err, &quality))
     return 0;
-
-  if (!HCL_ProcessReadings(phc->clock, n_readings, readings,
-                           &phc_ts, &sys_ts, &phc_err, &quality))
-    return 0;
-
-  LCL_CookTime(&sys_ts, &local_ts, &local_err);
-  if (quality > 0)
-    HCL_AccumulateSample(phc->clock, &phc_ts, &local_ts, phc_err + local_err);
 
   if (phc->extpps)
     return 0;

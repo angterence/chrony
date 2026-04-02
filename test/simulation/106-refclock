@@ -180,14 +180,17 @@ rm -f tmp/refclocks.log
 unset CLKNETSIM_PHC_JITTER_OFF
 unset CLKNETSIM_PHC_JITTER_ON
 export CLKNETSIM_PHC_JITTER=1e-7
-refclock_offset="(+ 0.399 (sum 1e-3))"
-refclock_jitter=1e-6
+refclock_jitter=""
+clocks="REALTIME,ptp2"
+extra_clknetsim_conf="
+node2_offset2 = -0.4
+node2_freq2 = (+ -1e-3 (* 2e-6 (pulse 1 1)))"
 servers=1
 freq_offset="(* 1e-4 (sine 1000))"
 base_delay="(* -1.0 (equal 0.1 (min time 5000) 5000))"
 client_server_options="minpoll 4 maxpoll 4 filter 5 minsamples 64"
 client_conf="
-refclock PHC /dev/ptp0 local poll 2
+refclock PHC /dev/ptp2 local poll 2
 logdir tmp
 log refclocks tracking"
 chronyc_conf=""

@@ -64,6 +64,7 @@ struct CLK_Instance_Record {
   int system;
   int control;
 
+  int locked;
   int reference_counter;
 
   struct clk_Driver driver;
@@ -434,6 +435,7 @@ CLK_Open(const char *name, int control)
   inst->fd = INVALID_CLOCK_FD;
   inst->system = 1;
   inst->control = control;
+  inst->locked = 1;
   inst->reference_counter = 1;
 
   if (strcmp(name, "SYS:REALTIME") == 0) {
@@ -648,13 +650,16 @@ handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double d
   CLK_Instance inst2;
   unsigned int i;
 
+  if (!inst->locked)
+    return;
+
   if (inst->hwclock) {
     HCL_SlewHw(inst->hwclock, cooked, dfreq, doffset);
   }
 
   for (i = 0; i < ARR_GetSize(clocks); i++) {
     inst2 = get_record(i);
-    if (inst2->hwclock_reference != inst)
+    if (inst2->hwclock_reference != inst || !inst2->locked)
       continue;
 
     HCL_SlewLocal(inst2->hwclock, cooked, dfreq, doffset);
@@ -701,7 +706,7 @@ update_other_clocks(CLK_Instance inst, struct timespec *cooked)
 
   for (i = 0; i < ARR_GetSize(clocks); i++) {
     inst2 = get_record(i);
-    if (inst2 == inst || !inst2->control)
+    if (inst2 == inst || !inst2->control || !inst->locked || !inst2->locked)
       continue;
 
     if (!CLK_ConvertTime(inst, 1, cooked, inst2, 1, &cooked2, NULL))
@@ -824,6 +829,22 @@ CLK_SetSyncStatus(CLK_Instance inst, int synchronised, double est_error, double 
     return;
 
   inst->driver.set_sync_status(inst->driver.context, synchronised, est_error, max_error);
+}
+
+/* ================================================== */
+
+void
+CLK_Unlock(CLK_Instance inst)
+{
+  inst->locked = 0;
+}
+
+/* ================================================== */
+
+void
+CLK_Lock(CLK_Instance inst)
+{
+  inst->locked = 1;
 }
 
 /* ================================================== */

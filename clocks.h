@@ -84,6 +84,10 @@ extern void CLK_SetLeap(CLK_Instance inst, int leap, int tai_offset);
 extern void CLK_SetSyncStatus(CLK_Instance inst, int synchronised, double est_error,
                               double max_error);
 
+extern void CLK_Unlock(CLK_Instance inst);
+
+extern void CLK_Lock(CLK_Instance inst);
+
 extern void CLK_AddDispersion(CLK_Instance inst, double dispersion);
 
 extern void CLK_CookTime(CLK_Instance inst, struct timespec *raw, struct timespec *cooked,

@@ -552,7 +552,9 @@ LCL_AccumulateFrequencyAndOffsetNoHandlers(double dfreq, double doffset, double 
   first_handler = change_list.next;
   change_list.next = &change_list;
 
+  CLK_Unlock(local_clock);
   r = LCL_AccumulateFrequencyAndOffset(dfreq, doffset, corr_rate);
+  CLK_Lock(local_clock);
 
   change_list.next = first_handler;
 

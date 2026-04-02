@@ -92,6 +92,10 @@ extern void CLK_AddDispersion(CLK_Instance inst, double dispersion);
 
 extern void CLK_CookTime(CLK_Instance inst, struct timespec *raw, struct timespec *cooked,
                          double *err);
+
+extern int CLK_ReadTimePair(CLK_Instance inst1, CLK_Instance inst2, struct timespec *raw1,
+                            struct timespec *raw2, double *err, int *quality);
+
 extern int CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
                            CLK_Instance to, int to_cooked, struct timespec *to_ts, double *err);
 extern int CLK_ConvertInterval(CLK_Instance from, CLK_Instance to, double interval,

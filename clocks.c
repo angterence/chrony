@@ -881,6 +881,59 @@ uncook_time(CLK_Instance inst, struct timespec *cooked, struct timespec *raw, do
 /* ================================================== */
 
 static void
+create_hwclock(CLK_Instance inst)
+{
+  inst->hwclock = HCL_CreateInstance(inst, inst->hwclock_reference,
+                                     inst->min_samples, inst->max_samples,
+                                     UTI_Log2ToDouble(inst->minpoll),
+                                     CLK_GetPrecision(inst));
+}
+
+/* ================================================== */
+
+int
+CLK_ReadTimePair(CLK_Instance inst1, CLK_Instance inst2,
+                 struct timespec *raw1, struct timespec *raw2, double *err, int *quality)
+{
+  struct timespec phc_readings[PHC_READINGS][3];
+  int n_readings;
+
+  if (!inst1->system || inst2->system)
+    return 0;
+
+  if (!inst2->hwclock_reference)
+    inst2->hwclock_reference = inst1;
+  if (inst2->hwclock_reference != inst1)
+    LOG_FATAL("Conflict");
+  if (!inst2->hwclock)
+    create_hwclock(inst2);
+
+  n_readings = SYS_Linux_GetPHCReadings(inst2->fd, inst1->id, inst2->nocrossts,
+                                        &inst2->phc_mode, PHC_READINGS, phc_readings);
+  if (n_readings <= 0)
+    return 0;
+
+  if (!HCL_ProcessReadings(inst2->hwclock, n_readings, phc_readings,
+                           raw2, raw1, err, quality))
+    return 0;
+
+  if (*quality > 0) {
+    struct timespec cooked1, cooked2;
+    double err1, err2;
+
+    CLK_CookTime(inst1, raw1, &cooked1, &err1);
+    if (HCL_NeedsNewSample(inst2->hwclock, &cooked1)) {
+      CLK_CookTime(inst2, raw2, &cooked2, &err2);
+      HCL_AccumulateSample(inst2->hwclock, &cooked2, &cooked1, *err + err1 + err2);
+    }
+  }
+
+  return 1;
+}
+
+/* ================================================== */
+
+static void
 poll_timeout(void *arg)
 {
   CLK_Instance inst = arg;
@@ -897,10 +950,9 @@ poll_timeout(void *arg)
 static int
 poll_phc(CLK_Instance inst, struct timespec *now)
 {
-  struct timespec sample_phc_ts, sample_sys_ts, sample_local_ts;
-  struct timespec phc_readings[PHC_READINGS][3], ts;
-  double phc_err, local_err, hw_err, interval;
-  int n_readings, quality;
+  struct timespec phc_ts, sys_ts, ts;
+  double phc_err, interval;
+  int quality;
 
   if (!SCH_IsInitialised())
     return 0;
@@ -910,10 +962,7 @@ poll_phc(CLK_Instance inst, struct timespec *now)
   inst->in_poll = 1;
 
   if (!inst->hwclock)
-    inst->hwclock = HCL_CreateInstance(inst, inst->hwclock_reference,
-                                       inst->min_samples, inst->max_samples,
-                                       UTI_Log2ToDouble(inst->minpoll),
-                                       CLK_GetPrecision(inst));
+    create_hwclock(inst);
 
   if (!now) {
     now = &ts;
@@ -929,9 +978,6 @@ poll_phc(CLK_Instance inst, struct timespec *now)
   DEBUG_LOG("Polling PHC on %s%s",
             inst->name, inst->hwclock_timeout_id != 0 ? " before timeout" : "");
 
-  n_readings = SYS_Linux_GetPHCReadings(inst->fd, inst->hwclock_reference->id, inst->nocrossts,
-                                        &inst->phc_mode, PHC_READINGS, phc_readings);
-
   /* Add timeout for the next poll in case no HW timestamp will be captured
      between the minpoll and maxpoll.  Separate reading of different PHCs to
      avoid long intervals between handling I/O events. */
@@ -941,23 +987,8 @@ poll_phc(CLK_Instance inst, struct timespec *now)
                                                      ARR_GetSize(clocks) / 4, 0.1,
                                                    SCH_PhcPollClass, poll_timeout, inst);
 
-  if (n_readings <= 0) {
-    inst->in_poll = 0;
-    return 0;
-  }
-
-  if (!HCL_ProcessReadings(inst->hwclock, n_readings, phc_readings,
-                           &sample_phc_ts, &sample_sys_ts, &phc_err, &quality) ||
-      quality <= 0) {
-    inst->in_poll = 0;
-    return 1;
-  }
-
-  CLK_CookTime(inst->hwclock_reference, &sample_sys_ts, &sample_local_ts, &local_err);
-  CLK_CookTime(inst, &sample_phc_ts, &sample_phc_ts, &hw_err);
-  HCL_AccumulateSample(inst->hwclock, &sample_phc_ts, &sample_local_ts,
-                       phc_err + local_err + hw_err);
-
+  if (!CLK_ReadTimePair(inst->hwclock_reference, inst, &sys_ts, &phc_ts, &phc_err, &quality))
+    ;
   inst->in_poll = 0;
 
   return 1;

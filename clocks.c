@@ -615,6 +615,20 @@ CLK_IsSystem(CLK_Instance inst)
 
 /* ================================================== */
 
+int
+CLK_IsTimerAccurate(CLK_Instance inst)
+{
+  switch (inst->id) {
+    case CLOCK_REALTIME:
+    case CLOCK_MONOTONIC:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/* ================================================== */
+
 double
 CLK_GetPrecision(CLK_Instance inst)
 {

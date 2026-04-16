@@ -62,6 +62,8 @@ extern const char *CLK_GetName(CLK_Instance inst);
 
 extern int CLK_IsSystem(CLK_Instance inst);
 
+extern int CLK_IsTimerAccurate(CLK_Instance inst);
+
 extern double CLK_GetPrecision(CLK_Instance inst);
 
 extern void CLK_ReadTime(CLK_Instance inst, struct timespec *ts);

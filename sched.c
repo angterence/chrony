@@ -155,7 +155,8 @@ SCH_Initialise(void)
 /* ================================================== */
 
 void
-SCH_Finalise(void) {
+SCH_Finalise(void)
+{
   unsigned int i;
 
   ARR_DestroyInstance(file_handlers);
@@ -182,8 +183,7 @@ SCH_IsInitialised(void)
 /* ================================================== */
 
 void
-SCH_AddFileHandler
-(int fd, int events, SCH_FileHandler handler, SCH_ArbitraryArgument arg)
+SCH_AddFileHandler(int fd, int events, SCH_FileHandler handler, SCH_ArbitraryArgument arg)
 {
   FileHandlerEntry *ptr;
 
@@ -216,7 +216,6 @@ SCH_AddFileHandler
   if (one_highest_fd < fd + 1)
     one_highest_fd = fd + 1;
 }
-
 
 /* ================================================== */
 

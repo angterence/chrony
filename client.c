@@ -2049,20 +2049,14 @@ get_source_name(IPAddr *ip_addr, char *buf, int size)
 {
   CMD_Request request;
   CMD_Reply reply;
-  int i;
 
   request.command = htons(REQ_NTP_SOURCE_NAME);
   UTI_IPHostToNetwork(ip_addr, &request.data.ntp_source_name.ip_addr);
   if (!request_reply(&request, &reply, RPY_NTP_SOURCE_NAME, 0) ||
       reply.data.ntp_source_name.name[sizeof (reply.data.ntp_source_name.name) - 1] != '\0' ||
-      snprintf(buf, size, "%s", (char *)reply.data.ntp_source_name.name) >= size)
+      snprintf(buf, size, "%s", (char *)reply.data.ntp_source_name.name) >= size ||
+      !UTI_IsPrintableWord(buf, size))
     return 0;
-
-  /* Make sure the name is printable */
-  for (i = 0; i < size && buf[i] != '\0'; i++) {
-    if (!isgraph((unsigned char)buf[i]))
-      return 0;
-  }
 
   return 1;
 }

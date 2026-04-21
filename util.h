@@ -263,6 +263,10 @@ extern unsigned int UTI_HexToBytes(const char *hex, void *buf, unsigned int len)
    number of pointers to the words. */
 extern int UTI_SplitString(char *string, char **words, int max_saved_words);
 
+/* Check if a buffer contains a terminated printable string not containing any
+   whitespace characters of at least one character */
+extern int UTI_IsPrintableWord(const char *buffer, unsigned int len);
+
 /* Check if two buffers of the same length contain the same data, but do the
    comparison in constant time with respect to the returned value to avoid
    creating a timing side channel */

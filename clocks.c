@@ -1172,3 +1172,37 @@ extern int CLK_ConvertInterval(CLK_Instance from, CLK_Instance to, double interv
 
   return 0;
 }
+
+/* ================================================== */
+
+int
+CLK_GetNumberOfClocks(void)
+{
+  return ARR_GetSize(clocks);
+}
+
+/* ================================================== */
+
+int
+CLK_GetReport(int index, RPT_ClockReport *report)
+{
+  struct timespec now;
+  CLK_Instance inst;
+
+  if (index < 0 || index >= ARR_GetSize(clocks))
+    return 0;
+
+  inst = get_record(index);
+
+  CLK_ReadTime(inst, &now);
+
+  report->name = CLK_GetName(inst);
+  report->cook_offset = inst->cook_offset;
+  report->precision = inst->precision;
+  report->raw_offset = get_driver_offset(inst, 0, &now, NULL);
+  report->last_time_adj = inst->last_time_offset;
+  report->freq_ppm = CLK_GetFrequency(inst);
+  report->last_freq_adj_ppm = inst->last_freq_offset * 1.0e6;
+
+  return 1;
+}

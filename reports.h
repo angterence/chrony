@@ -213,4 +213,14 @@ typedef struct {
   double hi_limit;
 } RPT_SelectReport;
 
+typedef struct {
+  const char *name;
+  double precision;
+  time_t cook_offset;
+  double raw_offset;
+  double last_time_adj;
+  double freq_ppm;
+  double last_freq_adj_ppm;
+} RPT_ClockReport;
+
 #endif /* GOT_REPORTS_H */

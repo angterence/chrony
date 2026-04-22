@@ -28,6 +28,8 @@
 #ifndef GOT_CLOCKS_H
 #define GOT_CLOCKS_H
 
+#include "reports.h"
+
 struct clk_Driver;
 typedef void clk_DriverContext;
 
@@ -102,5 +104,9 @@ extern int CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *
                            CLK_Instance to, int to_cooked, struct timespec *to_ts, double *err);
 extern int CLK_ConvertInterval(CLK_Instance from, CLK_Instance to, double interval,
                                double *result, double *err);
+
+extern int CLK_GetNumberOfClocks(void);
+
+extern int CLK_GetReport(int index, RPT_ClockReport *report);
 
 #endif

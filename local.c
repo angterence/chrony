@@ -638,28 +638,7 @@ LCL_SetAbsoluteFrequency(double afreq_ppm)
 void
 LCL_AccumulateDeltaFrequency(double dfreq)
 {
-  struct timespec raw, cooked;
-  double old_freq_ppm;
-
-  old_freq_ppm = current_freq_ppm;
-
-  /* Work out new absolute frequency.  Note that absolute frequencies
-   are handled in units of ppm, whereas the 'dfreq' argument is in
-   terms of the gradient of the (offset) v (local time) function. */
-
-  current_freq_ppm += dfreq * (1.0e6 - current_freq_ppm);
-
-  current_freq_ppm = clamp_freq(current_freq_ppm);
-
-  /* Call the system-specific driver for setting the frequency */
-  current_freq_ppm = (*drv_set_freq)(current_freq_ppm);
-  dfreq = (current_freq_ppm - old_freq_ppm) / (1.0e6 - old_freq_ppm);
-
-  LCL_ReadRawTime(&raw);
-  LCL_CookTime(&raw, &cooked, NULL);
-
-  /* Dispatch to all handlers */
-  invoke_parameter_change_handlers(&raw, &cooked, dfreq, 0.0, LCL_ChangeAdjust);
+  LCL_AccumulateFrequencyAndOffset(dfreq, 0.0, 0.0);
 }
 
 /* ================================================== */
@@ -667,23 +646,7 @@ LCL_AccumulateDeltaFrequency(double dfreq)
 int
 LCL_AccumulateOffset(double offset, double corr_rate)
 {
-  struct timespec raw, cooked;
-
-  /* In this case, the cooked time to be passed to the notify clients
-     has to be the cooked time BEFORE the change was made */
-
-  LCL_ReadRawTime(&raw);
-  LCL_CookTime(&raw, &cooked, NULL);
-
-  if (!check_offset(&cooked, offset))
-    return 0;
-
-  (*drv_accrue_offset)(offset, corr_rate);
-
-  /* Dispatch to all handlers */
-  invoke_parameter_change_handlers(&raw, &cooked, 0.0, offset, LCL_ChangeAdjust);
-
-  return 1;
+  return LCL_AccumulateFrequencyAndOffset(0.0, offset, corr_rate);
 }
 
 /* ================================================== */

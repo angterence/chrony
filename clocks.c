@@ -363,6 +363,9 @@ CLK_Finalise(void)
     CLK_Close(shadow_clock);
   CLK_Close(main_clock);
 
+  while (ARR_GetSize(clocks) > 0)
+    CLK_Close(get_record(0));
+
   BRIEF_ASSERT(ARR_GetSize(clocks) == 0);
   ARR_DestroyInstance(clocks);
 }
@@ -688,6 +691,33 @@ set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffs
 
 /* ================================================== */
 
+static void
+update_other_clocks(CLK_Instance inst, struct timespec *cooked)
+{
+  struct timespec cooked2;
+  double freq2, doffset2;
+  CLK_Instance inst2;
+  unsigned int i;
+
+  for (i = 0; i < ARR_GetSize(clocks); i++) {
+    inst2 = get_record(i);
+    if (inst2 == inst || !inst2->control)
+      continue;
+
+    if (!CLK_ConvertTime(inst, 1, cooked, inst2, 1, &cooked2, NULL))
+      continue;
+
+    if (!CLK_ConvertInterval(inst, inst2, 1.0, &freq2, NULL))
+      continue;
+
+    doffset2 = UTI_DiffTimespecsToDouble(&cooked2, cooked);
+    DEBUG_LOG("%s-%s dfreq %+.6f doffset %+.9f", CLK_GetName(inst2), CLK_GetName(inst),
+              (freq2 - 1.0) * 1e6, doffset2);
+    //TODO: sanitize this
+    freq2 = (((CLK_GetFrequency(inst2) / 1.0e6 + 1.0) * freq2) - 1.0) * 1.0e6;
+    set_frequency_and_accumulate_offset(inst2, freq2, doffset2, 0.0, &cooked2);
+  }
+}
 
 /* ================================================== */
 
@@ -704,6 +734,8 @@ CLK_SetFrequency(CLK_Instance inst, double freq)
   CLK_CookTime(inst, &raw, &cooked, NULL);
 
   r = set_frequency_and_accumulate_offset(inst, freq, 0.0, 0.0, &cooked);
+
+  update_other_clocks(inst, &cooked);
 
   return r;
 }
@@ -729,6 +761,7 @@ CLK_AccumulateFrequencyAndOffset(CLK_Instance inst, double dfreq, double doffset
 
   r = set_frequency_and_accumulate_offset(inst, freq, doffset, corr_rate, &cooked);
 
+  update_other_clocks(inst, &cooked);
 
   return r;
 }
@@ -1003,5 +1036,20 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
 extern int CLK_ConvertInterval(CLK_Instance from, CLK_Instance to, double interval,
                                double *result, double *err)
 {
+  double freq;
+
+  if (from->system && !to->system) {
+    if (!to->hwclock_reference)
+      return 0;
+    if (to->hwclock_reference != from)
+      LOG_FATAL("Conflict");
+    if (!HCL_GetFrequency(to->hwclock, &freq))
+      return 0;
+    *result = (freq / 1.0e6 + 1.0) * interval;
+    return 1;
+  }
+
+  //TODO: other conversions
+
   return 0;
 }

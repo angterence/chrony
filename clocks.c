@@ -84,6 +84,9 @@ struct CLK_Instance_Record {
   int phc_mode;
 
   int in_poll;
+
+  double last_time_offset;
+  double last_freq_offset;
 };
 
 /* ================================================== */
@@ -496,6 +499,9 @@ CLK_Open(const char *name, int control)
 
   inst->in_poll = 0;
 
+  inst->last_time_offset = 0.0;
+  inst->last_freq_offset = 0.0;
+
   /* Verify that the clock works */
   CLK_ReadTime(inst, &ts);
 
@@ -704,6 +710,9 @@ set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffs
   inst->frequency = freq;
 
   handle_change(inst, cooked, dfreq, doffset);
+
+  inst->last_time_offset = doffset;
+  inst->last_freq_offset = dfreq;
 
   return dfreq;
 }

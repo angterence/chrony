@@ -1165,13 +1165,14 @@ give_help(void)
 {
   int line, len;
   const char *s, cols[] =
-    "System clock:\0\0"
+    "Clock:\0\0"
     "tracking\0Display system time information\0"
     "makestep\0Correct clock by stepping immediately\0"
     "makestep <threshold> <updates>\0Configure automatic clock stepping\0"
     "maxupdateskew <skew>\0Modify maximum valid skew to update frequency\0"
     "waitsync [<max-tries> [<max-correction> [<max-skew> [<interval>]]]]\0"
                           "Wait until synchronised in specified limits\0"
+    "clocks\0Display information about tracked clocks\0"
     "\0\0"
     "Time sources:\0\0"
     "sources [-a] [-v]\0Display information about current sources\0"
@@ -1288,7 +1289,7 @@ command_name_generator(const char *text, int state)
   const char *name, **names[TAB_COMPLETE_MAX_INDEX];
   const char *base_commands[] = {
     "accheck", "activity", "add", "allow", "authdata", "burst",
-    "clients", "cmdaccheck", "cmdallow", "cmddeny", "cyclelogs", "delete",
+    "clients", "clocks", "cmdaccheck", "cmdallow", "cmddeny", "cyclelogs", "delete",
     "deny", "dns", "dump", "exit", "help", "keygen", "local", "makestep",
     "manual", "maxdelay", "maxdelaydevratio", "maxdelayratio", "maxpoll",
     "maxupdateskew", "minpoll", "minstratum", "ntpdata",
@@ -1601,6 +1602,9 @@ request_reply(CMD_Request *request, CMD_Reply *reply, int requested_reply, int v
         break;
       case STT_INVALIDNAME:
         printf("521 Invalid name");
+        break;
+      case STT_NOSUCHCLOCK:
+        printf("522 No such clock");
         break;
       default:
         printf("520 Got unexpected error from daemon");
@@ -2870,6 +2874,47 @@ process_cmd_clients(char *line)
   return 1;
 }
 
+/* ================================================== */
+
+static int
+process_cmd_clocks(char *line)
+{
+  uint32_t i, n_clocks;
+  CMD_Request request;
+  CMD_Reply reply;
+
+  request.command = htons(REQ_N_CLOCKS);
+  if (!request_reply(&request, &reply, RPY_N_CLOCKS, 0))
+    return 0;
+
+  n_clocks = ntohl(reply.data.n_clocks.n_clocks);
+
+  print_header("TBD                   ");
+
+  for (i = 0; i < n_clocks; i++) {
+    request.command = htons(REQ_CLOCK_DATA);
+    request.data.clock_data.index = htonl(i);
+    if (!request_reply(&request, &reply, RPY_CLOCK_DATA, 0))
+      return 0;
+
+    if (!UTI_IsPrintableWord((char *)reply.data.clock_data.name,
+                             sizeof (reply.data.clock_data.name)))
+      return 0;
+
+    print_report("%-30s %S %+S %+S %+S %+P %+P\n",
+                 (char *)reply.data.clock_data.name,
+                 UTI_FloatNetworkToHost(reply.data.clock_data.precision),
+                 (double)UTI_Integer64NetworkToHost(reply.data.clock_data.cook_offset),
+                 UTI_FloatNetworkToHost(reply.data.clock_data.raw_offset),
+                 UTI_FloatNetworkToHost(reply.data.clock_data.last_time_adj),
+                 UTI_FloatNetworkToHost(reply.data.clock_data.freq_ppm),
+                 UTI_FloatNetworkToHost(reply.data.clock_data.last_freq_adj_ppm),
+                 REPORT_END);
+  }
+
+  return 1;
+}
+
 
 /* ================================================== */
 /* Process the manual list command */
@@ -3368,6 +3413,9 @@ process_line(char *line)
     do_normal_submit = process_cmd_burst(&tx_message, line);
   } else if (!strcmp(command, "clients")) {
     ret = process_cmd_clients(line);
+    do_normal_submit = 0;
+  } else if (!strcmp(command, "clocks")) {
+    ret = process_cmd_clocks(line);
     do_normal_submit = 0;
   } else if (!strcmp(command, "cmdaccheck")) {
     do_normal_submit = process_cmd_cmdaccheck(&tx_message, line);

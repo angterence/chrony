@@ -112,7 +112,9 @@
 #define REQ_MODIFY_OFFSET 73
 #define REQ_LOCAL3 74
 #define REQ_ADD_SOURCE2 75
-#define N_REQUEST_TYPES 76
+#define REQ_N_CLOCKS 76
+#define REQ_CLOCK_DATA 77
+#define N_REQUEST_TYPES 78
 
 /* Structure used to exchange timespecs independent of time_t size */
 typedef struct {
@@ -399,6 +401,11 @@ typedef struct {
   int32_t EOR;
 } REQ_Modify_Offset;
 
+typedef struct {
+  uint32_t index;
+  int32_t EOR;
+} REQ_ClockData;
+
 /* ================================================== */
 
 #define PKT_TYPE_CMD_REQUEST 1
@@ -506,6 +513,7 @@ typedef struct {
     REQ_SelectData select_data;
     REQ_Modify_SelectOpts modify_select_opts;
     REQ_Modify_Offset modify_offset;
+    REQ_ClockData clock_data;
   } data; /* Command specific parameters */
 
   /* Padding used to prevent traffic amplification.  It only defines the
@@ -543,7 +551,9 @@ typedef struct {
 #define RPY_SERVER_STATS3 24
 #define RPY_SERVER_STATS4 25
 #define RPY_NTP_DATA2 26
-#define N_REPLY_TYPES 27
+#define RPY_N_CLOCKS 27
+#define RPY_CLOCK_DATA 28
+#define N_REPLY_TYPES 29
 
 /* Status codes */
 #define STT_SUCCESS 0
@@ -567,6 +577,7 @@ typedef struct {
 #define STT_BADPKTVERSION 18
 #define STT_BADPKTLENGTH 19
 #define STT_INVALIDNAME 21
+#define STT_NOSUCHCLOCK 22
 
 typedef struct {
   int32_t EOR;
@@ -819,6 +830,22 @@ typedef struct {
 } RPY_SelectData;
 
 typedef struct {
+  uint32_t n_clocks;
+  int32_t EOR;
+} RPY_N_Clocks;
+
+typedef struct {
+  uint8_t name[256];
+  Integer64 cook_offset;
+  Float precision;
+  Float raw_offset;
+  Float last_time_adj;
+  Float freq_ppm;
+  Float last_freq_adj_ppm;
+  int32_t EOR;
+} RPY_ClockData;
+
+typedef struct {
   uint8_t version;
   uint8_t pkt_type;
   uint8_t res1;
@@ -850,6 +877,8 @@ typedef struct {
     RPY_NTPSourceName ntp_source_name;
     RPY_AuthData auth_data;
     RPY_SelectData select_data;
+    RPY_N_Clocks n_clocks;
+    RPY_ClockData clock_data;
   } data; /* Reply specific parameters */
 
 } CMD_Reply;

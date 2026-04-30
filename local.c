@@ -45,9 +45,6 @@
 /* Variable to store the current frequency, in ppm */
 static double current_freq_ppm;
 
-/* Maximum allowed frequency, in ppm */
-static double max_freq_ppm;
-
 /* Temperature compensation, in ppm */
 static double temp_comp_ppm;
 
@@ -115,11 +112,6 @@ LCL_Initialise(void)
   precision_log = round(log(precision_quantum) / log(2.0));
   /* NTP code doesn't support smaller log than -30 */
   assert(precision_log >= -30);
-
-  /* This is the maximum allowed frequency offset in ppm, the time must
-     never stop or run backwards */
-  max_freq_ppm = CNF_GetMaxDrift();
-  max_freq_ppm = CLAMP(0.0, max_freq_ppm, 100000.0);
 
   max_clock_error = CNF_GetMaxClockError() * 1e-6;
 }
@@ -381,19 +373,6 @@ LCL_ReadAbsoluteFrequency(void)
 
 /* ================================================== */
 
-static double
-clamp_freq(double freq)
-{
-  if (freq <= max_freq_ppm && freq >= -max_freq_ppm)
-    return freq;
-
-  LOG(LOGS_WARN, "Frequency %.1f ppm exceeds allowed maximum", freq);
-
-  return CLAMP(-max_freq_ppm, freq, max_freq_ppm);
-}
-
-/* ================================================== */
-
 static int
 check_offset(struct timespec *now, double offset)
 {
@@ -416,8 +395,6 @@ LCL_SetAbsoluteFrequency(double afreq_ppm)
   struct timespec raw, cooked;
   double dfreq;
   
-  afreq_ppm = clamp_freq(afreq_ppm);
-
   /* Apply temperature compensation */
   if (temp_comp_ppm != 0.0) {
     afreq_ppm = afreq_ppm * (1.0 - 1.0e-6 * temp_comp_ppm) - temp_comp_ppm;

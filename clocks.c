@@ -55,6 +55,8 @@
 #define MIN_PHC_POLL -6
 #define MAX_PHC_POLL 20
 
+#define MAX_FREQUENCY 100000.0
+
 #define NSEC_PER_SEC 1000000000
 
 #define NOCONTROL_CORRECTION_THRESHOLD 10000
@@ -73,6 +75,7 @@ struct CLK_Instance_Record {
   time_t cook_offset;
 
   double precision;
+  double max_frequency;
   double frequency;
 
   int minpoll;
@@ -525,6 +528,10 @@ CLK_Open(const char *name, int control)
   inst->precision = CLAMP(1.0e-9, inst->precision, 1.0);
   DEBUG_LOG("%s precision %.9f", inst->name, inst->precision);
 
+  /* Time must never stop or run backwards */
+  inst->max_frequency = CNF_GetMaxDrift();
+  inst->max_frequency = CLAMP(0.0, inst->max_frequency, MAX_FREQUENCY);
+
   BRIEF_ASSERT(inst->driver.read_frequency);
   inst->frequency = inst->driver.read_frequency(inst->driver.context);
 
@@ -710,6 +717,19 @@ handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double d
 /* ================================================== */
 
 static double
+clamp_frequency(CLK_Instance inst, double freq)
+{
+  if (freq <= inst->max_frequency && freq >= -inst->max_frequency)
+    return freq;
+
+  LOG(LOGS_WARN, "Frequency %.1f ppm exceeds allowed maximum", freq);
+
+  return CLAMP(-inst->max_frequency, freq, inst->max_frequency);
+}
+
+/* ================================================== */
+
+static double
 set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffset,
                                     double corr_rate, struct timespec *cooked)
 {
@@ -718,7 +738,7 @@ set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffs
   BRIEF_ASSERT(inst->driver.set_frequency);
   BRIEF_ASSERT(inst->driver.accumulate_offset);
 
-  //TODO: clamp freq
+  freq = clamp_frequency(inst, freq);
 
   freq = inst->driver.set_frequency(inst->driver.context, freq);
   if (doffset != 0.0)

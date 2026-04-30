@@ -124,6 +124,7 @@ static double combine_limit = 3.0;
 
 static int cmd_port = DEFAULT_CANDM_PORT;
 
+static int do_log_clocks = 0;
 static int raw_measurements = 0;
 static int do_log_measurements = 0;
 static int do_log_selection = 0;
@@ -1141,7 +1142,9 @@ parse_log(char *line)
     log_name = line;
     line = CPS_SplitWord(line);
     if (*log_name) {
-      if (!strcmp(log_name, "rawmeasurements")) {
+      if (!strcmp(log_name, "clocks")) {
+        do_log_clocks = 1;
+      } else if (!strcmp(log_name, "rawmeasurements")) {
         do_log_measurements = 1;
         raw_measurements = 1;
       } else if (!strcmp(log_name, "measurements")) {
@@ -2243,6 +2246,14 @@ char *
 CNF_GetDumpDir(void)
 {
   return dumpdir;
+}
+
+/* ================================================== */
+
+int
+CNF_GetLogClocks(void)
+{
+  return do_log_clocks;
 }
 
 /* ================================================== */

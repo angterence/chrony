@@ -60,6 +60,7 @@ extern char *CNF_GetDriftFile(int *interval);
 extern char *CNF_GetLogDir(void);
 extern char *CNF_GetDumpDir(void);
 extern int CNF_GetLogBanner(void);
+extern int CNF_GetLogClocks(void);
 extern int CNF_GetLogMeasurements(int *raw);
 extern int CNF_GetLogSelection(void);
 extern int CNF_GetLogStatistics(void);

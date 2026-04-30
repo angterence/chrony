@@ -105,6 +105,8 @@ static ARR_Instance clocks;
 static CLK_Instance main_clock;
 static CLK_Instance shadow_clock;
 
+static LOG_FileID log_id;
+
 /* ================================================== */
 
 static int poll_phc(CLK_Instance inst, struct timespec *now);
@@ -362,6 +364,10 @@ CLK_Initialise(int control)
         LOG_FATAL("Could not open clock");
     }
   }
+
+  log_id = CNF_GetLogClocks() ? LOG_FileOpen("clocks",
+           "   Date (UTC) Time     TBD")
+           : -1;
 }
 
 /* ================================================== */
@@ -693,6 +699,20 @@ get_driver_offset(CLK_Instance inst, int reverse, struct timespec *ts, double *e
 /* ================================================== */
 
 static void
+log_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double doffset)
+{
+  if (log_id == -1)
+    return;
+
+  LOG_FileWrite(log_id,
+                "%s %-25s %10.3f %10.3e %10.3e %10.3e",
+                UTI_TimeToLogForm(cooked->tv_sec), inst->name,
+                inst->frequency, dfreq, doffset, get_driver_offset(inst, 1, cooked, NULL));
+}
+
+/* ================================================== */
+
+static void
 handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double doffset)
 {
   CLK_Instance inst2;
@@ -712,6 +732,8 @@ handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double d
 
     HCL_SlewLocal(inst2->hwclock, cooked, dfreq, doffset);
   }
+
+  log_change(inst, cooked, dfreq, doffset);
 }
 
 /* ================================================== */

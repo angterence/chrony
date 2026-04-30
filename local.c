@@ -349,10 +349,7 @@ LCL_ReadCookedTime(struct timespec *result, double *err)
 void
 LCL_CookTime(struct timespec *raw, struct timespec *cooked, double *err)
 {
-  double correction;
-
-  LCL_GetOffsetCorrection(raw, &correction, err);
-  UTI_AddDoubleToTimespec(raw, correction, cooked);
+  CLK_CookTime(local_clock, raw, cooked, err);
 }
 
 /* ================================================== */

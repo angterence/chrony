@@ -57,6 +57,8 @@
 
 #define NSEC_PER_SEC 1000000000
 
+#define NOCONTROL_CORRECTION_THRESHOLD 10000
+
 struct CLK_Instance_Record {
   char *name;
   clockid_t id;
@@ -68,6 +70,7 @@ struct CLK_Instance_Record {
   int reference_counter;
 
   struct clk_Driver driver;
+  time_t cook_offset;
 
   double precision;
   double frequency;
@@ -486,6 +489,8 @@ CLK_Open(const char *name, int control)
   inst->driver.set_leap = NULL;
   inst->driver.set_sync_status = NULL;
 
+  inst->cook_offset = 0;
+
   inst->minpoll = 0;
   inst->maxpoll = 1;
   inst->min_samples = 2;
@@ -664,6 +669,22 @@ CLK_GetFrequency(CLK_Instance inst)
 
 /* ================================================== */
 
+static double
+get_driver_offset(CLK_Instance inst, int reverse, struct timespec *ts, double *err)
+{
+  struct timespec ts2;
+
+  BRIEF_ASSERT(inst->driver.get_offset);
+
+  ts2 = *ts;
+  if (reverse)
+    ts2.tv_sec -= inst->cook_offset;
+
+  return inst->driver.get_offset(inst->driver.context, reverse, &ts2, err);
+}
+
+/* ================================================== */
+
 static void
 handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double doffset)
 {
@@ -710,6 +731,25 @@ set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffs
   inst->frequency = freq;
 
   handle_change(inst, cooked, dfreq, doffset);
+
+  if (!inst->control) {
+    struct timespec raw;
+    double offset;
+
+    //TODO: avoid this call
+    CLK_ReadTime(inst, &raw);
+#if 1
+    offset = get_driver_offset(inst, 0, &raw, NULL);
+#else
+    offset = get_driver_offset(inst, 1, cooked, NULL);
+#endif
+
+    if (fabs(offset) >= NOCONTROL_CORRECTION_THRESHOLD) {
+      time_t rounded_offset = round(offset);
+      inst->cook_offset += rounded_offset;
+      inst->driver.accumulate_offset(inst->driver.context, rounded_offset, corr_rate);
+    }
+  }
 
   inst->last_time_offset = doffset;
   inst->last_freq_offset = dfreq;
@@ -799,9 +839,8 @@ CLK_AccumulateFrequencyAndOffset(CLK_Instance inst, double dfreq, double doffset
 double
 CLK_GetOffset(CLK_Instance inst, int reverse, struct timespec *ts, double *err)
 {
-  BRIEF_ASSERT(inst->driver.get_offset);
-
-  return inst->driver.get_offset(inst->driver.context, reverse, ts, err);
+  return get_driver_offset(inst, reverse, ts, err) +
+         (reverse ? -inst->cook_offset : inst->cook_offset);
 }
 
 /* ================================================== */
@@ -886,8 +925,9 @@ CLK_CookTime(CLK_Instance inst, struct timespec *raw, struct timespec *cooked, d
 {
   double offset;
 
-  offset = CLK_GetOffset(inst, 0, raw, err);
+  offset = get_driver_offset(inst, 0, raw, err);
   UTI_AddDoubleToTimespec(raw, offset, cooked);
+  cooked->tv_sec += inst->cook_offset;
 }
 
 /* ================================================== */
@@ -895,9 +935,13 @@ CLK_CookTime(CLK_Instance inst, struct timespec *raw, struct timespec *cooked, d
 static void
 uncook_time(CLK_Instance inst, struct timespec *cooked, struct timespec *raw, double *err)
 {
+  struct timespec cooked2;
   double offset;
 
-  offset = CLK_GetOffset(inst, 1, cooked, err);
+  cooked2 = *cooked;
+  cooked2.tv_sec -= inst->cook_offset;
+
+  offset = get_driver_offset(inst, 1, &cooked2, err);
   UTI_AddDoubleToTimespec(cooked, -offset, raw);
 }
 

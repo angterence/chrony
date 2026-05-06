@@ -64,6 +64,7 @@ static void read_ext_pulse(int sockfd, int event, void *anything);
 static int phc_initialise(RCL_Instance instance)
 {
   const char *options[] = {"nocrossts", "extpps", "pin", "channel", "clear", NULL};
+  char clock_name[128];
   struct phc_instance *phc;
   int rising_edge;
   struct stat st;
@@ -80,7 +81,9 @@ static int phc_initialise(RCL_Instance instance)
 
   //TODO: open O_RDWR but w/o clock control if phc->extpps.
   //TODO: what about different instances using different configuration?
-  phc->clock = CLK_Open(path, 0);
+  if (snprintf(clock_name, sizeof (clock_name), "PHC:%s", path) >= sizeof (clock_name))
+    LOG_FATAL("clock name too long");
+  phc->clock = CLK_Open(clock_name, 0);
   if (!phc->clock)
     goto error;
   CLK_SetPoll(phc->clock, RCL_GetDriverPoll(instance) - 1, RCL_GetDriverPoll(instance));

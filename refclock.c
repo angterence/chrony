@@ -58,6 +58,7 @@ struct FilterSample {
 };
 
 struct RCL_Instance_Record {
+  CLK_Instance target_clock;
   RefclockDriver *driver;
   void *data;
   char *driver_parameter;
@@ -175,6 +176,7 @@ RCL_AddRefclock(RefclockParameters *params)
   if (params->tai && !CNF_GetLeapSecList() && !CNF_GetLeapSecTimezone())
     LOG_FATAL("refclock tai option requires leapseclist or leapsectz");
 
+  inst->target_clock = NULL;
   inst->data = NULL;
   inst->driver_parameter = Strdup(params->driver_parameter);
   inst->driver_parameter_length = 0;
@@ -245,6 +247,11 @@ RCL_AddRefclock(RefclockParameters *params)
     return 0;
   }
 
+  if (!inst->target_clock) {
+    inst->target_clock = CLK_Open("SYS:REALTIME", 0);
+    if (!inst->target_clock)
+      LOG_FATAL("Could not open clock");
+  }
   /* Don't require more than one sample per poll and combine 60% of the
      samples closest to the median offset */
   inst->filter = SPF_CreateInstance(1, params->filter_length, params->max_dispersion, 0.6);
@@ -334,6 +341,12 @@ RCL_ModifyOffset(uint32_t ref_id, double offset)
     }
   }
   return 0;
+}
+
+void
+RCL_SetTargetClock(RCL_Instance instance, CLK_Instance clock)
+{
+  instance->target_clock = clock;
 }
 
 void
@@ -463,18 +476,25 @@ int
 RCL_AddSample(RCL_Instance instance, struct timespec *sample_time,
               struct timespec *ref_time, int leap, int quality)
 {
-  double correction, dispersion, raw_offset, offset;
+  double correction, conv_dispersion, dispersion, raw_offset, offset;
   struct timespec cooked_time;
 
   if (instance->pps_forced)
     return RCL_AddPulse(instance, sample_time,
                         1.0e-9 * (sample_time->tv_nsec - ref_time->tv_nsec), quality);
 
+  //TODO: improve precision?
+  if (!CLK_ConvertTime(instance->target_clock, 0, sample_time,
+                       LCL_GetLocalClock(), 0, sample_time, &conv_dispersion)) {
+    DEBUG_LOG("Could not convert sample time to target clock");
+    return 0;
+  }
+
   raw_offset = UTI_DiffTimespecsToDouble(ref_time, sample_time);
 
   LCL_GetOffsetCorrection(sample_time, &correction, &dispersion);
   UTI_AddDoubleToTimespec(sample_time, correction, &cooked_time);
-  dispersion += instance->precision;
+  dispersion += conv_dispersion + instance->precision;
 
   /* Make sure the timestamp and offset provided by the driver are sane */
   if (!UTI_IsTimeOffsetSane(sample_time, raw_offset) ||
@@ -521,12 +541,21 @@ RCL_AddSample(RCL_Instance instance, struct timespec *sample_time,
 int
 RCL_AddPulse(RCL_Instance instance, struct timespec *pulse_time, double second, int quality)
 {
-  double correction, dispersion;
-  struct timespec cooked_time;
+  double correction, dispersion, conv_dispersion = 0.0;
+  struct timespec conv_pulse_time, cooked_time;
+
+  if (!CLK_ConvertTime(instance->target_clock, 0, pulse_time,
+                       LCL_GetLocalClock(), 0, &conv_pulse_time, &conv_dispersion)) {
+    DEBUG_LOG("Could not convert sample time to target clock");
+    return 0;
+  }
+
+  second += UTI_DiffTimespecsToDouble(&conv_pulse_time, pulse_time);
+  *pulse_time = conv_pulse_time;
 
   LCL_GetOffsetCorrection(pulse_time, &correction, &dispersion);
   UTI_AddDoubleToTimespec(pulse_time, correction, &cooked_time);
-  second += correction;
+  second += conv_dispersion + correction;
 
   if (!UTI_IsTimeOffsetSane(pulse_time, 0.0))
     return 0;

@@ -121,6 +121,7 @@ static int phc_initialise(RCL_Instance instance)
     phc->pin = phc->channel = 0;
   }
 
+  RCL_SetTargetClock(instance, LCL_GetLocalClock());
   RCL_SetDriverData(instance, phc);
   return 1;
 

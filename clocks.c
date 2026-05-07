@@ -907,7 +907,7 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
       *to_ts = ts2;
       err3 = 0.0;
     } else {
-      assert(0);
+      uncook_time(to, &ts2, to_ts, &err3);
     }
 
     if (err)

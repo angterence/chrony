@@ -1007,8 +1007,10 @@ CLK_ReadTimePair(CLK_Instance inst1, CLK_Instance inst2,
   struct timespec phc_readings[PHC_READINGS][3];
   int n_readings;
 
-  if (!inst1->system || inst2->system)
+  if (!inst1->system || inst2->system) {
+    DEBUG_LOG("Unsupported pair");
     return 0;
+  }
 
   if (!inst2->hwclock_reference)
     inst2->hwclock_reference = inst1;
@@ -1189,6 +1191,8 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
     return 1;
   }
 
+  DEBUG_LOG("Unsupported conversion");
+
   return 0;
 }
 
@@ -1211,6 +1215,7 @@ extern int CLK_ConvertInterval(CLK_Instance from, CLK_Instance to, double interv
   }
 
   //TODO: other conversions
+  DEBUG_LOG("Unsupported conversion");
 
   return 0;
 }

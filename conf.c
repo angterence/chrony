@@ -983,11 +983,12 @@ parse_refclock(char *line)
 {
   int n, poll, dpoll, filter_length, pps_rate, min_samples_, max_samples_, sel_options;
   int local, max_lock_age, max_unreach, pps_forced, sel_option, stratum, tai, optional;
+  char *p, *cmd, *name, *param, *target_clock_name;
   uint32_t ref_id, lock_ref_id;
   double offset, delay, precision, max_dispersion, pulse_width;
-  char *p, *cmd, *name, *param;
   RefclockParameters *refclock;
 
+  target_clock_name = NULL;
   optional = 0;
   poll = 4;
   dpoll = 0;
@@ -1046,6 +1047,11 @@ parse_refclock(char *line)
         break;
     } else if (!strcasecmp(cmd, "filter")) {
       if (!SSCANF_IN_RANGE(line, "%d%n", &filter_length, &n, 0, INT_MAX))
+        break;
+    } else if (!strcasecmp(cmd, "clock")) {
+      target_clock_name = line;
+      n = CPS_SplitWord(line) - line;
+      if (n == 0)
         break;
     } else if (!strcasecmp(cmd, "local")) {
       n = 0;
@@ -1109,6 +1115,7 @@ parse_refclock(char *line)
   refclock = (RefclockParameters *)ARR_GetNewElement(refclock_sources);
   refclock->driver_name = name;
   refclock->driver_parameter = param;
+  refclock->target_clock_name = target_clock_name ? Strdup(target_clock_name) : NULL;
   refclock->driver_poll = dpoll;
   refclock->poll = poll;
   refclock->optional = optional;
@@ -2170,6 +2177,7 @@ CNF_AddRefclocks(void)
     RCL_AddRefclock(refclock);
     Free(refclock->driver_name);
     Free(refclock->driver_parameter);
+    Free(refclock->target_clock_name);
   }
 
   ARR_SetSize(refclock_sources, 0);

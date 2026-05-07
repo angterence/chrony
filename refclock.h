@@ -35,6 +35,7 @@
 typedef struct {
   char *driver_name;
   char *driver_parameter;
+  char *target_clock_name;
   int driver_poll;
   int poll;
   int optional;

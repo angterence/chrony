@@ -248,10 +248,12 @@ RCL_AddRefclock(RefclockParameters *params)
   }
 
   if (!inst->target_clock) {
-    inst->target_clock = CLK_Open("SYS:REALTIME", 0);
+    inst->target_clock = CLK_Open(params->target_clock_name ?
+                                  params->target_clock_name : "SYS:REALTIME", 0);
     if (!inst->target_clock)
       LOG_FATAL("Could not open clock");
   }
+
   /* Don't require more than one sample per poll and combine 60% of the
      samples closest to the median offset */
   inst->filter = SPF_CreateInstance(1, params->filter_length, params->max_dispersion, 0.6);

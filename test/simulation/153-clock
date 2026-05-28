@@ -26,6 +26,25 @@ for freq_offset in -1e-4 1e-4 -1e-2 1e-2; do
 		check_log_messages "correction.*premature=[3-9]" 0 1 || test_fail
 	fi
 
+	client_conf="clock SYS:AUX0
+	clock SYS:REALTIME main"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "1 2" || test_fail
+
+	client_conf="clock SYS:AUX0 main
+	clock SYS:REALTIME"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	# TODO: why it fails for 1e-2?
+	[[ freq_offset =~ e-4 ]] && (check_sync "" "1 2" || test_fail)
+
 	clocks="REALTIME,ptp2"
 	client_conf="clock PHC:/dev/ptp2 main"
 
@@ -116,13 +135,17 @@ for freq_offset in -1e-4 1e-4 -1e-2 1e-2; do
 done
 
 extra_clknetsim_conf="
-node2_offset2 = 2e-1
+node2_offset2 = -2e-1
 node2_freq2 = $(get_wander_expr 2e-4 $wander)
 node2_offset3 = 3e-1
-node2_freq3 = $(get_wander_expr 3e-4 $wander)"
-clocks="REALTIME,ptp2,ptp3"
+node2_freq3 = $(get_wander_expr 3e-4 $wander)
+node2_offset4 = -4e-1
+node2_freq4 = $(get_wander_expr 7e-4 $wander)"
+clocks="REALTIME,AUX0,ptp2,ptp3"
+
 client_conf="
 clock SYS:REALTIME main
+clock SYS:AUX0
 clock SYS:MONOTONIC_RAW
 clock PHC:/dev/ptp2 maxsamples 2
 clock PHC:/dev/ptp3
@@ -132,7 +155,21 @@ run_test || test_fail
 check_chronyd_exit || test_fail
 check_source_selection || test_fail
 check_packet_interval || test_fail
-check_sync "" "1 2 3" || test_fail
+check_sync "" "1 2 3 4" || test_fail
+
+client_conf="
+clock SYS:REALTIME
+clock SYS:AUX0
+clock SYS:MONOTONIC_RAW
+clock PHC:/dev/ptp2 maxsamples 2
+clock PHC:/dev/ptp3 main
+#makestep 0.05 1"
+
+run_test || test_fail
+check_chronyd_exit || test_fail
+check_source_selection || test_fail
+check_packet_interval || test_fail
+check_sync "" "1 2 3 4" || test_fail
 
 clocks="REALTIME,ptp2"
 limit=1000

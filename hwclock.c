@@ -97,6 +97,10 @@ HCL_SlewLocal(HCL_Instance clock, struct timespec *cooked, double dfreq, double 
 {
   double delta;
 
+  DEBUG_LOG("dfreq=%e doffset=%e freq=%e offset=%e", dfreq, doffset,
+            clock->valid_coefs ? clock->frequency - 1.0 : 0.0,
+            clock->valid_coefs ? clock->offset : 0.0);
+
   if (clock->n_samples)
     UTI_AdjustTimespec(&clock->local_ref, cooked, &clock->local_ref, &delta, dfreq, doffset);
   if (clock->valid_coefs)

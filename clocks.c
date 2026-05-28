@@ -94,7 +94,7 @@ struct tracking {
   HCL_Instance hwclock;
   SCH_TimeoutID hwclock_timeout_id;
   int phc_mode;
-  int in_poll;
+  int in_update;
 };
 
 /* Array of struct tracking * */
@@ -114,7 +114,7 @@ static LOG_FileID log_id;
 
 /* ================================================== */
 
-static int poll_phc(struct tracking *tracking, struct timespec *now);
+static int update_tracking(struct tracking *tracking, struct timespec *now);
 
 /* ================================================== */
 
@@ -352,7 +352,7 @@ get_tracking(CLK_Instance inst1, CLK_Instance inst2)
                                          CLK_GetPrecision(inst1));
   tracking->hwclock_timeout_id = 0;
   tracking->phc_mode = 0;
-  tracking->in_poll = 0;
+  tracking->in_update = 0;
 
   ARR_AppendElement(tracking_map, &tracking);
 
@@ -1085,13 +1085,13 @@ poll_timeout(void *arg)
   tracking->hwclock_timeout_id = 0;
 
   SCH_GetLastEventTime(&now, NULL, NULL);
-  poll_phc(tracking, &now);
+  update_tracking(tracking, &now);
 }
 
 /* ================================================== */
 
 static int
-poll_phc(struct tracking *tracking, struct timespec *now)
+update_tracking(struct tracking *tracking, struct timespec *now)
 {
   struct timespec phc_ts, sys_ts, ts;
   double phc_err, interval;
@@ -1100,9 +1100,9 @@ poll_phc(struct tracking *tracking, struct timespec *now)
   if (!SCH_IsInitialised())
     return 0;
 
-  if (tracking->in_poll)
+  if (tracking->in_update)
     return 0;
-  tracking->in_poll = 1;
+  tracking->in_update = 1;
 
   if (!now) {
     now = &ts;
@@ -1111,7 +1111,7 @@ poll_phc(struct tracking *tracking, struct timespec *now)
   }
 
   if (!HCL_NeedsNewSample(tracking->hwclock, now)) {
-    tracking->in_poll = 0;
+    tracking->in_update = 0;
     return 1;
   }
 
@@ -1129,7 +1129,7 @@ poll_phc(struct tracking *tracking, struct timespec *now)
 
   if (!CLK_ReadTimePair(tracking->to, tracking->from, &sys_ts, &phc_ts, &phc_err, &quality))
     ;
-  tracking->in_poll = 0;
+  tracking->in_update = 0;
 
   return 1;
 }
@@ -1160,7 +1160,7 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
   if (!from->system && to->system) {
     tracking = get_tracking(from, to);
 
-    if (!poll_phc(tracking, NULL))
+    if (!update_tracking(tracking, NULL))
       return 0;
 
     if (from_cooked) {
@@ -1189,7 +1189,7 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
   if (from->system && !to->system) {
     tracking = get_tracking(to, from);
 
-    if (!poll_phc(tracking, NULL))
+    if (!update_tracking(tracking, NULL))
       return 0;
 
     if (from_cooked) {

@@ -118,7 +118,8 @@ chronyc_conf="authdata -a
 selectdata -a
 sources -a
 sourcestats -a
-clients -k"
+clients -k
+clocks"
 
 run_test || test_fail
 check_chronyd_exit || test_fail
@@ -144,7 +145,10 @@ Name/IP Address                          NP  NR  Span  Frequency  Freq Skew  Off
 ID#0000000002                             0   0     0     \+0\.000   2000\.000     \+0ns  4000ms
 (2001:db8:c001:cafe:1234:1234:1234:1234|ID#0000000003)    [0 ]+   0     0     \+0\.000   2000\.000     \+0ns  4000ms
 Hostname                                    NTP   Drop Int IntL Last  NTS-KE   Drop Int  Last
-=============================================================================================$" || test_fail
+=============================================================================================
+TBD                   
+======================
+SYS:REALTIME.*" || test_fail
 
 chronyc_options=""
 server_strata=0
@@ -244,6 +248,7 @@ for chronyc_conf in \
 	"activity" \
 	"authdata" \
 	"clients" \
+	"clocks" \
 	"manual list" \
 	"ntpdata" \
 	"rtcdata" \
@@ -572,7 +577,7 @@ run_test || test_fail
 check_chronyc_output "^1 (MD5|SHA1) HEX:........................................
 10 MD5 HEX:................................
 11 MD5 HEX:....................
-System clock:.*this help
+Clock:.*this help
  *$" || test_fail
 
 chronyc_conf="keygen 10 NOSUCHTYPE 128

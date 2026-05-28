@@ -777,6 +777,7 @@ handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double d
     tracking = *(struct tracking **)ARR_GetElement(tracking_map, i);
     if (!tracking->hwclock)
       continue;
+    //TODO: handle CLOCK_MONOTONIC vs CLOCK_REALTIME?
     if (tracking->from == inst && tracking->to->locked)
       HCL_SlewHw(tracking->hwclock, cooked, dfreq, doffset);
     if (tracking->to == inst && tracking->from->locked)

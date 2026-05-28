@@ -84,16 +84,21 @@ struct CLK_Instance_Record {
   int max_samples;
   int nocrossts;
 
-  CLK_Instance hwclock_reference;
-  HCL_Instance hwclock;
-  SCH_TimeoutID hwclock_timeout_id;
-  int phc_mode;
-
-  int in_poll;
-
   double last_time_offset;
   double last_freq_offset;
 };
+
+struct tracking {
+  CLK_Instance from;
+  CLK_Instance to;
+  HCL_Instance hwclock;
+  SCH_TimeoutID hwclock_timeout_id;
+  int phc_mode;
+  int in_poll;
+};
+
+/* Array of struct tracking * */
+ARR_Instance tracking_map;
 
 /* ================================================== */
 
@@ -109,7 +114,7 @@ static LOG_FileID log_id;
 
 /* ================================================== */
 
-static int poll_phc(CLK_Instance inst, struct timespec *now);
+static int poll_phc(struct tracking *tracking, struct timespec *now);
 
 /* ================================================== */
 
@@ -318,6 +323,46 @@ get_record(unsigned int index)
 
 /* ================================================== */
 
+static struct tracking *
+get_tracking(CLK_Instance inst1, CLK_Instance inst2)
+{
+  CLK_Instance tmp;
+  struct tracking *tracking;
+  unsigned int i;
+
+  if ((inst1->system == inst2->system && inst1 > inst2) ||
+      (inst1->system && !inst2->system)) {
+    tmp = inst1;
+    inst1 = inst2;
+    inst2 = tmp;
+  }
+
+  for (i = 0; i < ARR_GetSize(tracking_map); i++) {
+    tracking = *(struct tracking **)ARR_GetElement(tracking_map, i);
+    if (tracking->from == inst1 && tracking->to == inst2)
+      return tracking;
+  }
+
+  tracking = MallocNew(struct tracking);
+  tracking->from = inst1;
+  tracking->to = inst2;
+  tracking->hwclock = HCL_CreateInstance(inst1, inst2,
+                                         inst1->min_samples, inst1->max_samples,
+                                         UTI_Log2ToDouble(inst1->minpoll),
+                                         CLK_GetPrecision(inst1));
+  tracking->hwclock_timeout_id = 0;
+  tracking->phc_mode = 0;
+  tracking->in_poll = 0;
+
+  ARR_AppendElement(tracking_map, &tracking);
+
+  DEBUG_LOG("Added %s->%s tracking", inst1->name, inst2->name);
+
+  return tracking;
+}
+
+/* ================================================== */
+
 void
 CLK_Initialise(int control)
 {
@@ -329,6 +374,7 @@ CLK_Initialise(int control)
   control_allowed = control;
   main_clock = shadow_clock = NULL;
   clocks = ARR_CreateInstance(sizeof (CLK_Instance));
+  tracking_map = ARR_CreateInstance(sizeof (struct tracking *));
 
   conf_clocks = CNF_GetClocks();
 
@@ -506,13 +552,6 @@ CLK_Open(const char *name, int control)
   inst->max_samples = 16;
   inst->nocrossts = 0;
 
-  inst->hwclock_reference = NULL;
-  inst->hwclock = NULL;
-  inst->hwclock_timeout_id = 0;
-  inst->phc_mode = 0;
-
-  inst->in_poll = 0;
-
   inst->last_time_offset = 0.0;
   inst->last_freq_offset = 0.0;
 
@@ -556,11 +595,24 @@ error:
 void
 CLK_Close(CLK_Instance inst)
 {
+  struct tracking *tracking;
   unsigned int i;
 
   if (inst->reference_counter > 1) {
     inst->reference_counter--;
     return;
+  }
+
+  for (i = 0; i < ARR_GetSize(tracking_map); i++) {
+    tracking = *(struct tracking **)ARR_GetElement(tracking_map, i);
+    if (tracking->from != inst && tracking->to != inst)
+      continue;
+    if (tracking->hwclock) {
+      HCL_DestroyInstance(tracking->hwclock);
+      SCH_RemoveTimeout(tracking->hwclock_timeout_id);
+    }
+    Free(tracking);
+    ARR_RemoveElement(tracking_map, i--);
   }
 
   for (i = 0; i < ARR_GetSize(clocks); i++) {
@@ -571,9 +623,6 @@ CLK_Close(CLK_Instance inst)
   }
 
   SYS_FinaliseClockDriver(&inst->driver, inst->control);
-
-  if (inst->hwclock)
-    HCL_DestroyInstance(inst->hwclock);
 
   Free(inst->name);
   Free(inst);
@@ -715,22 +764,20 @@ log_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double doff
 static void
 handle_change(CLK_Instance inst, struct timespec *cooked, double dfreq, double doffset)
 {
-  CLK_Instance inst2;
+  struct tracking *tracking;
   unsigned int i;
 
   if (!inst->locked)
     return;
 
-  if (inst->hwclock) {
-    HCL_SlewHw(inst->hwclock, cooked, dfreq, doffset);
-  }
-
-  for (i = 0; i < ARR_GetSize(clocks); i++) {
-    inst2 = get_record(i);
-    if (inst2->hwclock_reference != inst || !inst2->locked)
+  for (i = 0; i < ARR_GetSize(tracking_map); i++) {
+    tracking = *(struct tracking **)ARR_GetElement(tracking_map, i);
+    if (!tracking->hwclock)
       continue;
-
-    HCL_SlewLocal(inst2->hwclock, cooked, dfreq, doffset);
+    if (tracking->from == inst && tracking->to->locked)
+      HCL_SlewHw(tracking->hwclock, cooked, dfreq, doffset);
+    if (tracking->to == inst && tracking->from->locked)
+      HCL_SlewLocal(tracking->hwclock, cooked, dfreq, doffset);
   }
 
   log_change(inst, cooked, dfreq, doffset);
@@ -989,22 +1036,12 @@ uncook_time(CLK_Instance inst, struct timespec *cooked, struct timespec *raw, do
 
 /* ================================================== */
 
-static void
-create_hwclock(CLK_Instance inst)
-{
-  inst->hwclock = HCL_CreateInstance(inst, inst->hwclock_reference,
-                                     inst->min_samples, inst->max_samples,
-                                     UTI_Log2ToDouble(inst->minpoll),
-                                     CLK_GetPrecision(inst));
-}
-
-/* ================================================== */
-
 int
 CLK_ReadTimePair(CLK_Instance inst1, CLK_Instance inst2,
                  struct timespec *raw1, struct timespec *raw2, double *err, int *quality)
 {
   struct timespec phc_readings[PHC_READINGS][3];
+  struct tracking *tracking;
   int n_readings;
 
   if (!inst1->system || inst2->system) {
@@ -1012,19 +1049,14 @@ CLK_ReadTimePair(CLK_Instance inst1, CLK_Instance inst2,
     return 0;
   }
 
-  if (!inst2->hwclock_reference)
-    inst2->hwclock_reference = inst1;
-  if (inst2->hwclock_reference != inst1)
-    LOG_FATAL("Conflict");
-  if (!inst2->hwclock)
-    create_hwclock(inst2);
+  tracking = get_tracking(inst1, inst2);
 
   n_readings = SYS_Linux_GetPHCReadings(inst2->fd, inst1->id, inst2->nocrossts,
-                                        &inst2->phc_mode, PHC_READINGS, phc_readings);
+                                        &tracking->phc_mode, PHC_READINGS, phc_readings);
   if (n_readings <= 0)
     return 0;
 
-  if (!HCL_ProcessReadings(inst2->hwclock, n_readings, phc_readings,
+  if (!HCL_ProcessReadings(tracking->hwclock, n_readings, phc_readings,
                            raw2, raw1, err, quality))
     return 0;
 
@@ -1033,9 +1065,9 @@ CLK_ReadTimePair(CLK_Instance inst1, CLK_Instance inst2,
     double err1, err2;
 
     CLK_CookTime(inst1, raw1, &cooked1, &err1);
-    if (HCL_NeedsNewSample(inst2->hwclock, &cooked1)) {
+    if (HCL_NeedsNewSample(tracking->hwclock, &cooked1)) {
       CLK_CookTime(inst2, raw2, &cooked2, &err2);
-      HCL_AccumulateSample(inst2->hwclock, &cooked2, &cooked1, *err + err1 + err2);
+      HCL_AccumulateSample(tracking->hwclock, &cooked2, &cooked1, *err + err1 + err2);
     }
   }
 
@@ -1047,19 +1079,19 @@ CLK_ReadTimePair(CLK_Instance inst1, CLK_Instance inst2,
 static void
 poll_timeout(void *arg)
 {
-  CLK_Instance inst = arg;
+  struct tracking *tracking = arg;
   struct timespec now;
 
-  inst->hwclock_timeout_id = 0;
+  tracking->hwclock_timeout_id = 0;
 
   SCH_GetLastEventTime(&now, NULL, NULL);
-  poll_phc(inst, &now);
+  poll_phc(tracking, &now);
 }
 
 /* ================================================== */
 
 static int
-poll_phc(CLK_Instance inst, struct timespec *now)
+poll_phc(struct tracking *tracking, struct timespec *now)
 {
   struct timespec phc_ts, sys_ts, ts;
   double phc_err, interval;
@@ -1068,39 +1100,36 @@ poll_phc(CLK_Instance inst, struct timespec *now)
   if (!SCH_IsInitialised())
     return 0;
 
-  if (inst->in_poll)
+  if (tracking->in_poll)
     return 0;
-  inst->in_poll = 1;
-
-  if (!inst->hwclock)
-    create_hwclock(inst);
+  tracking->in_poll = 1;
 
   if (!now) {
     now = &ts;
-    CLK_ReadTime(inst->hwclock_reference, now);
-    CLK_CookTime(inst->hwclock_reference, now, now, NULL);
+    CLK_ReadTime(tracking->to, now);
+    CLK_CookTime(tracking->to, now, now, NULL);
   }
 
-  if (!HCL_NeedsNewSample(inst->hwclock, now)) {
-    inst->in_poll = 0;
+  if (!HCL_NeedsNewSample(tracking->hwclock, now)) {
+    tracking->in_poll = 0;
     return 1;
   }
 
   DEBUG_LOG("Polling PHC on %s%s",
-            inst->name, inst->hwclock_timeout_id != 0 ? " before timeout" : "");
+            tracking->from->name, tracking->hwclock_timeout_id != 0 ? " before timeout" : "");
 
   /* Add timeout for the next poll in case no HW timestamp will be captured
      between the minpoll and maxpoll.  Separate reading of different PHCs to
      avoid long intervals between handling I/O events. */
-  SCH_RemoveTimeout(inst->hwclock_timeout_id);
-  interval = UTI_Log2ToDouble(inst->maxpoll);
-  inst->hwclock_timeout_id = SCH_AddTimeoutInClass(interval, interval /
-                                                     ARR_GetSize(clocks) / 4, 0.1,
-                                                   SCH_PhcPollClass, poll_timeout, inst);
+  SCH_RemoveTimeout(tracking->hwclock_timeout_id);
+  interval = UTI_Log2ToDouble(tracking->from->maxpoll);
+  tracking->hwclock_timeout_id = SCH_AddTimeoutInClass(interval, interval /
+                                                       ARR_GetSize(clocks) / 4, 0.1,
+                                                       SCH_PhcPollClass, poll_timeout, tracking);
 
-  if (!CLK_ReadTimePair(inst->hwclock_reference, inst, &sys_ts, &phc_ts, &phc_err, &quality))
+  if (!CLK_ReadTimePair(tracking->to, tracking->from, &sys_ts, &phc_ts, &phc_err, &quality))
     ;
-  inst->in_poll = 0;
+  tracking->in_poll = 0;
 
   return 1;
 }
@@ -1111,6 +1140,7 @@ int
 CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
                 CLK_Instance to, int to_cooked, struct timespec *to_ts, double *err)
 {
+  struct tracking *tracking;
   struct timespec ts1, ts2;
   double err1, err2, err3;
 
@@ -1128,12 +1158,9 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
   }
 
   if (!from->system && to->system) {
-    if (!from->hwclock_reference)
-      from->hwclock_reference = to;
-    if (from->hwclock_reference != to)
-      LOG_FATAL("Conflict");
+    tracking = get_tracking(from, to);
 
-    if (!poll_phc(from, NULL))
+    if (!poll_phc(tracking, NULL))
       return 0;
 
     if (from_cooked) {
@@ -1143,7 +1170,7 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
       CLK_CookTime(from, from_ts, &ts1, &err1);
     }
 
-    if (!HCL_CookTime(from->hwclock, &ts1, &ts2, &err2))
+    if (!HCL_CookTime(tracking->hwclock, &ts1, &ts2, &err2))
       return 0;
 
     if (to_cooked) {
@@ -1160,12 +1187,9 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
   }
 
   if (from->system && !to->system) {
-    if (!to->hwclock_reference)
-      to->hwclock_reference = from;
-    if (to->hwclock_reference != from)
-      LOG_FATAL("Conflict");
+    tracking = get_tracking(to, from);
 
-    if (!poll_phc(to, NULL))
+    if (!poll_phc(tracking, NULL))
       return 0;
 
     if (from_cooked) {
@@ -1175,7 +1199,7 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
       CLK_CookTime(from, from_ts, &ts1, &err1);
     }
 
-    if (!HCL_UncookTime(to->hwclock, &ts1, &ts2, &err2))
+    if (!HCL_UncookTime(tracking->hwclock, &ts1, &ts2, &err2))
       return 0;
 
     if (to_cooked) {
@@ -1201,14 +1225,12 @@ CLK_ConvertTime(CLK_Instance from, int from_cooked, struct timespec *from_ts,
 extern int CLK_ConvertInterval(CLK_Instance from, CLK_Instance to, double interval,
                                double *result, double *err)
 {
+  struct tracking *tracking;
   double freq;
 
   if (from->system && !to->system) {
-    if (!to->hwclock_reference)
-      return 0;
-    if (to->hwclock_reference != from)
-      LOG_FATAL("Conflict");
-    if (!HCL_GetFrequency(to->hwclock, &freq))
+    tracking = get_tracking(from, to);
+    if (!HCL_GetFrequency(tracking->hwclock, &freq))
       return 0;
     *result = (freq / 1.0e6 + 1.0) * interval;
     return 1;

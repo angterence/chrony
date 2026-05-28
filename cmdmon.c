@@ -1427,9 +1427,6 @@ handle_readwrite_commands(int command, CMD_Request *request, CMD_Reply *reply)
     case REQ_BURST:
       handle_burst(request, reply);
       break;
-    case REQ_CLOCK_DATA:
-      handle_clock_data(request, reply);
-      break;
     case REQ_CMDALLOW:
       handle_cmdallowdeny(request, reply, 1, 0);
       break;
@@ -1507,9 +1504,6 @@ handle_readwrite_commands(int command, CMD_Request *request, CMD_Reply *reply)
       break;
     case REQ_MODIFY_SELECTOPTS:
       handle_modify_selectopts(request, reply);
-      break;
-    case REQ_N_CLOCKS:
-      handle_n_clocks(request, reply);
       break;
     case REQ_OFFLINE:
       handle_offline(request, reply);
@@ -1597,6 +1591,9 @@ handle_readonly_commands(int command, int full_access, CMD_Request *request, CMD
     case REQ_CLIENT_ACCESSES_BY_INDEX3:
       handle_client_accesses_by_index(request, reply);
       break;
+    case REQ_CLOCK_DATA:
+      handle_clock_data(request, reply);
+      break;
     case REQ_CMDACCHECK:
       handle_cmdaccheck(request, reply);
       break;
@@ -1608,6 +1605,9 @@ handle_readonly_commands(int command, int full_access, CMD_Request *request, CMD
       break;
     case REQ_NTP_SOURCE_NAME:
       handle_ntp_source_name(request, reply);
+      break;
+    case REQ_N_CLOCKS:
+      handle_n_clocks(request, reply);
       break;
     case REQ_N_SOURCES:
       handle_n_sources(request, reply);

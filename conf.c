@@ -1387,6 +1387,9 @@ parse_open_commands(char *line)
       add_open_command(REQ_AUTH_DATA);
     } else if (strcasecmp(s, "clients") == 0) {
       add_open_command(REQ_CLIENT_ACCESSES_BY_INDEX3);
+    } else if (strcasecmp(s, "clocks") == 0) {
+      add_open_command(REQ_N_CLOCKS);
+      add_open_command(REQ_CLOCK_DATA);
     } else if (strcasecmp(s, "manual") == 0) {
       add_open_command(REQ_MANUAL_LIST);
     } else if (strcasecmp(s, "ntpdata") == 0) {

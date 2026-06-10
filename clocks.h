@@ -39,6 +39,8 @@ extern void CLK_Initialise(int control);
 
 extern void CLK_Finalise(void);
 
+extern void CLK_StartTracking(void);
+
 extern int CLK_IsAnyControlled(void);
 
 extern CLK_Instance CLK_GetMainClock(void);

@@ -437,6 +437,22 @@ CLK_Finalise(void)
 
 /* ================================================== */
 
+void
+CLK_StartTracking(void)
+{
+  CLK_Instance clock;
+  unsigned int i;
+
+  for (i = 0; i < ARR_GetSize(clocks); i++) {
+    clock = get_record(i);
+    if (clock == main_clock)
+      continue;
+    update_tracking(get_tracking(main_clock, clock), NULL);
+  }
+}
+
+/* ================================================== */
+
 int
 CLK_IsAnyControlled(void)
 {

@@ -725,6 +725,8 @@ int main
 
   UTI_SetQuitSignalsHandler(signal_cleanup, 1);
 
+  CLK_StartTracking();
+
   CAM_OpenUnixSocket();
 
   if (scfilter_level)

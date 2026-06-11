@@ -970,6 +970,8 @@ CLK_ApplyStepOffset(CLK_Instance inst, double offset)
 
   handle_change(inst, &cooked, 0.0, offset);
 
+  update_other_clocks(inst, &cooked);
+
   return 1;
 }
 

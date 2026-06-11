@@ -1276,6 +1276,7 @@ REF_ModifyMakestep(int limit, double threshold)
   make_step_limit = limit;
   make_step_threshold = threshold;
   LOG(LOGS_INFO, "New makestep %f %d", threshold, limit);
+  //TODO: update CLK limit?
 }
 
 /* ================================================== */

@@ -110,6 +110,10 @@ static ARR_Instance clocks;
 static CLK_Instance main_clock;
 static CLK_Instance shadow_clock;
 
+static int step_limit;
+static double step_threshold;
+static SCH_TimeoutID step_check_timeout_id;
+
 static LOG_FileID log_id;
 
 /* ================================================== */
@@ -414,6 +418,9 @@ CLK_Initialise(int control)
     }
   }
 
+  CNF_GetMakeStep(&step_limit, &step_threshold);
+  step_check_timeout_id = 0;
+
   log_id = CNF_GetLogClocks() ? LOG_FileOpen("clocks",
            "   Date (UTC) Time     TBD")
            : -1;
@@ -424,6 +431,9 @@ CLK_Initialise(int control)
 void
 CLK_Finalise(void)
 {
+  if (step_check_timeout_id != 0)
+    SCH_RemoveTimeout(step_check_timeout_id);
+
   if (main_clock != shadow_clock)
     CLK_Close(shadow_clock);
   CLK_Close(main_clock);
@@ -869,6 +879,57 @@ set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffs
 /* ================================================== */
 
 static void
+step_check_timeout(void *arg)
+{
+  struct timespec now, cooked;
+  CLK_Instance clock;
+  unsigned int i;
+  double offset;
+
+  step_check_timeout_id = 0;
+
+  for (i = 0; i < ARR_GetSize(clocks); i++) {
+    clock = get_record(i);
+    if (clock == main_clock)
+      continue;
+    CLK_ReadTime(clock, &now);
+    CLK_CookTime(clock, &now, &cooked, NULL);
+    offset = UTI_DiffTimespecsToDouble(&cooked, &now);
+
+    if (fabs(offset) > step_threshold) {
+      set_frequency_and_accumulate_offset(clock, clock->frequency, offset, 0.0, &cooked);
+      if (CLK_ApplyStepOffset(clock, -offset))
+        LOG(LOGS_WARN, "%s was stepped by %.6f seconds", clock->name, -offset);
+      else
+        //TODO
+        ;
+    }
+  }
+}
+
+/* ================================================== */
+
+static void
+schedule_step_check(int force)
+{
+  if (!force) {
+    //TODO: this assumes this function is only called through CLK_Accumulate*
+    //on every and only reference update
+    if (step_limit <= 0)
+      return;
+    if (step_limit > 0)
+      step_limit--;
+  }
+
+  if (step_check_timeout_id != 0)
+    return;
+
+  step_check_timeout_id = SCH_AddTimeoutByDelay(0.0, step_check_timeout, NULL);
+}
+
+/* ================================================== */
+
+static void
 update_other_clocks(CLK_Instance inst, struct timespec *cooked)
 {
   struct timespec cooked2;
@@ -940,6 +1001,8 @@ CLK_AccumulateFrequencyAndOffset(CLK_Instance inst, double dfreq, double doffset
 
   update_other_clocks(inst, &cooked);
 
+  schedule_step_check(0);
+
   return r;
 }
 
@@ -971,6 +1034,9 @@ CLK_ApplyStepOffset(CLK_Instance inst, double offset)
   handle_change(inst, &cooked, 0.0, offset);
 
   update_other_clocks(inst, &cooked);
+
+  if (inst == main_clock)
+    schedule_step_check(1);
 
   return 1;
 }

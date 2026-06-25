@@ -851,6 +851,8 @@ set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffs
 
   handle_change(inst, cooked, dfreq, doffset);
 
+  UTI_AddDoubleToTimespec(cooked, -doffset, cooked);
+
   if (!inst->control) {
     struct timespec raw;
     double offset;
@@ -933,7 +935,7 @@ static void
 update_other_clocks(CLK_Instance inst, struct timespec *cooked)
 {
   struct timespec cooked2;
-  double freq2, doffset2;
+  double freq_ratio, old_freq2, new_freq2, doffset2;
   CLK_Instance inst2;
   unsigned int i;
 
@@ -942,18 +944,21 @@ update_other_clocks(CLK_Instance inst, struct timespec *cooked)
     if (inst2 == inst || !inst2->control || !inst->locked || !inst2->locked)
       continue;
 
+    /* cooked was corrected in set_frequency_and_accumulate_offset() */
     if (!CLK_ConvertTime(inst, 1, cooked, inst2, 1, &cooked2, NULL))
       continue;
 
-    if (!CLK_ConvertInterval(inst, inst2, 1.0, &freq2, NULL))
+    if (!CLK_ConvertInterval(inst, inst2, 1.0, &freq_ratio, NULL))
       continue;
 
     doffset2 = UTI_DiffTimespecsToDouble(&cooked2, cooked);
-    DEBUG_LOG("%s-%s dfreq %+.6f doffset %+.9f", CLK_GetName(inst2), CLK_GetName(inst),
-              (freq2 - 1.0) * 1e6, doffset2);
-    //TODO: sanitize this
-    freq2 = (((CLK_GetFrequency(inst2) / 1.0e6 + 1.0) * freq2) - 1.0) * 1.0e6;
-    set_frequency_and_accumulate_offset(inst2, freq2, doffset2, 0.0, &cooked2);
+
+    old_freq2 = CLK_GetFrequency(inst2);
+    new_freq2 = old_freq2 + (freq_ratio - 1.0) * (1.0e6 - old_freq2);
+    set_frequency_and_accumulate_offset(inst2, new_freq2, doffset2, 0.0, &cooked2);
+
+    DEBUG_LOG("%s-%s dfreq %+.6f doffset %+.9f freq %+.6f->%+.6f", CLK_GetName(inst2), CLK_GetName(inst),
+              (freq_ratio - 1.0) * 1e6, doffset2, old_freq2, new_freq2);
   }
 }
 
@@ -1332,10 +1337,10 @@ extern int CLK_ConvertInterval(CLK_Instance from, CLK_Instance to, double interv
     return 0;
 
   if (from == tracking->from && to == tracking->to) {
-    *result = interval / (freq / 1.0e6 + 1.0);
+    *result = interval * (1.0 - freq / 1.0e6);
     return 1;
   } else if (from == tracking->to && to == tracking->from) {
-    *result = interval * (freq / 1.0e6 + 1.0);
+    *result = interval * (1.0 + freq / (1.0e6 + freq));
     return 1;
   } else {
     assert(0);

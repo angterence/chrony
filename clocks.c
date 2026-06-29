@@ -1218,9 +1218,9 @@ poll_timeout(void *arg)
 static int
 update_tracking(struct tracking *tracking, struct timespec *now)
 {
+  int quality, on_timeout, early;
   struct timespec ts, ts1, ts2;
   double err, interval;
-  int quality;
 
   if (!SCH_IsInitialised())
     return 0;
@@ -1235,23 +1235,28 @@ update_tracking(struct tracking *tracking, struct timespec *now)
     CLK_CookTime(tracking->to, now, now, NULL);
   }
 
-  if (!HCL_NeedsNewSample(tracking->hwclock, now)) {
+  early = !HCL_NeedsNewSample(tracking->hwclock, now);
+  on_timeout = tracking->hwclock_timeout_id == 0;
+
+  /* Add timeout for the next poll in case no HW timestamp will be captured
+     between the minpoll and maxpoll.  Separate reading of different PHCs to
+     avoid long intervals between handling I/O events. */
+  if (!early || on_timeout) {
+    SCH_RemoveTimeout(tracking->hwclock_timeout_id);
+    interval = UTI_Log2ToDouble(tracking->from->maxpoll);
+    tracking->hwclock_timeout_id = SCH_AddTimeoutInClass(interval, interval /
+                                                         ARR_GetSize(clocks) / 4, 0.1,
+                                                         SCH_PhcPollClass, poll_timeout, tracking);
+  }
+
+  if (early) {
+    DEBUG_LOG("early");
     tracking->in_update = 0;
     return 1;
   }
 
   DEBUG_LOG("Polling %s-%s%s",
-            tracking->from->name, tracking->to->name,
-            tracking->hwclock_timeout_id != 0 ? " before timeout" : "");
-
-  /* Add timeout for the next poll in case no HW timestamp will be captured
-     between the minpoll and maxpoll.  Separate reading of different PHCs to
-     avoid long intervals between handling I/O events. */
-  SCH_RemoveTimeout(tracking->hwclock_timeout_id);
-  interval = UTI_Log2ToDouble(tracking->from->maxpoll);
-  tracking->hwclock_timeout_id = SCH_AddTimeoutInClass(interval, interval /
-                                                       ARR_GetSize(clocks) / 4, 0.1,
-                                                       SCH_PhcPollClass, poll_timeout, tracking);
+            tracking->from->name, tracking->to->name, !on_timeout ? " before timeout" : "");
 
   if (!CLK_ReadTimePair(tracking->to, tracking->from, &ts1, &ts2, &err, &quality))
     ;

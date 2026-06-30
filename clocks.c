@@ -86,6 +86,8 @@ struct CLK_Instance_Record {
 
   double last_time_offset;
   double last_freq_offset;
+
+  int in_update;
 };
 
 struct tracking {
@@ -584,6 +586,8 @@ CLK_Open(const char *name, int control)
   inst->last_time_offset = 0.0;
   inst->last_freq_offset = 0.0;
 
+  inst->in_update = 0;
+
   /* Verify that the clock works */
   CLK_ReadTime(inst, &ts);
 
@@ -836,6 +840,9 @@ set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffs
 
   BRIEF_ASSERT(inst->driver.set_frequency);
   BRIEF_ASSERT(inst->driver.accumulate_offset);
+  BRIEF_ASSERT(!inst->in_update);
+
+  inst->in_update = 1;
 
   freq = clamp_frequency(inst, freq);
 
@@ -874,6 +881,8 @@ set_frequency_and_accumulate_offset(CLK_Instance inst, double freq, double doffs
 
   inst->last_time_offset = doffset;
   inst->last_freq_offset = dfreq;
+
+  inst->in_update = 0;
 
   return dfreq;
 }
@@ -1225,7 +1234,7 @@ update_tracking(struct tracking *tracking, struct timespec *now)
   if (!SCH_IsInitialised())
     return 0;
 
-  if (tracking->in_update)
+  if (tracking->in_update || tracking->from->in_update || tracking->to->in_update)
     return 0;
   tracking->in_update = 1;
 

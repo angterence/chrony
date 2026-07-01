@@ -67,6 +67,7 @@ struct CLK_Instance_Record {
   int fd;
   int system;
   int control;
+  int start_tracking;
 
   int locked;
   int reference_counter;
@@ -393,6 +394,8 @@ CLK_Initialise(int control)
     if (!clock)
       LOG_FATAL("Could not open clock");
 
+    clock->start_tracking = 1;
+
     if (conf->main)
       main_clock = clock;
     if (conf->shadow)
@@ -457,7 +460,7 @@ CLK_StartTracking(void)
 
   for (i = 0; i < ARR_GetSize(clocks); i++) {
     clock = get_record(i);
-    if (clock == main_clock)
+    if (clock == main_clock || !clock->start_tracking)
       continue;
     update_tracking(get_tracking(main_clock, clock), NULL);
   }
@@ -527,6 +530,7 @@ CLK_Open(const char *name, int control)
   inst->fd = INVALID_CLOCK_FD;
   inst->system = 1;
   inst->control = control;
+  inst->start_tracking = 0;
   inst->locked = 1;
   inst->reference_counter = 1;
 

@@ -22,7 +22,19 @@ if [ $# -ge 2 ]; then
     esac
 fi
 
-# Note: for networkd-dispatcher routable.d ~= on and off.d ~= off
+# For networkd-dispatcher, consider only selected states to avoid acting on an
+# interface that is routable but not yet configured. Install in the off.d,
+# no-carrier.d, routable.d, and configured.d directories.
+if [ -n "$OperationalState" ] && [ -n "$AdministrativeState" ]; then
+    case "$OperationalState:$AdministrativeState" in
+        routable:configured)
+            ;;
+        no-carrier:*|off:*)
+            ;;
+        *:*)
+            exit 0;;
+    esac
+fi
 
 $chronyc onoffline > /dev/null 2>&1
 

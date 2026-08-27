@@ -224,6 +224,7 @@ feat_sechash=1
 try_nettle=1
 try_nss=1
 try_tomcrypt=1
+try_wolfssl=0
 feat_nts=1
 try_gnutls=1
 feat_rtc=1
@@ -379,6 +380,9 @@ do
     ;;
     --without-tomcrypt )
       try_tomcrypt=0
+    ;;
+    --enable-wolfssl )
+      try_wolfssl=1
     ;;
     --disable-nts )
       feat_nts=0
@@ -993,6 +997,30 @@ if [ $feat_sechash = "1" ] && [ "x$HASH_LINK" = "x" ] && [ $try_tomcrypt = "1" ]
   fi
 fi
 
+if [ $feat_sechash = "1" ] && [ "x$HASH_LINK" = "x" ] && [ $try_wolfssl = "1" ]; then
+
+  test_cflags="`pkg_config --cflags wolfssl`"
+  test_link="`pkg_config --libs wolfssl`"
+
+  if test_code 'wolfssl' 'wolfssl/options.h wolfssl/wolfcrypt/hash.h' "$test_cflags" "$test_link" \
+    'wc_HashGetDigestSize(WC_HASH_TYPE_SHA256);'
+  then
+    HASH_OBJ="hash_wolfssl.o"
+    HASH_LINK="$test_link"
+    MYCPPFLAGS="$MYCPPFLAGS $test_cflags"
+    add_def FEAT_SECHASH
+    add_def HAVE_WOLFSSL
+
+    if test_code 'CMAC in wolfSSL' 'wolfssl/options.h wolfssl/wolfcrypt/cmac.h' "$test_cflags" "$test_link" \
+      'wc_InitCmac(NULL, NULL, 0, 0, NULL);'
+    then
+      add_def HAVE_CMAC
+      EXTRA_OBJECTS="$EXTRA_OBJECTS cmac_wolfssl.o"
+      EXTRA_CLI_OBJECTS="$EXTRA_CLI_OBJECTS cmac_wolfssl.o"
+    fi
+  fi
+fi
+
 EXTRA_OBJECTS="$EXTRA_OBJECTS $HASH_OBJ"
 EXTRA_CLI_OBJECTS="$EXTRA_CLI_OBJECTS $HASH_OBJ"
 LIBS="$LIBS $HASH_LINK"
@@ -1048,13 +1076,35 @@ if [ $feat_nts = "1" ] && [ $try_gnutls = "1" ]; then
     fi
 
     if grep '#define HAVE_SIV' config.h > /dev/null; then
-      EXTRA_OBJECTS="$EXTRA_OBJECTS nts_ke_client.o nts_ke_server.o nts_ke_session.o tls_gnutls.o"
-      EXTRA_OBJECTS="$EXTRA_OBJECTS nts_ntp_auth.o nts_ntp_client.o nts_ntp_server.o"
+      EXTRA_OBJECTS="$EXTRA_OBJECTS tls_gnutls.o"
       LIBS="$LIBS $test_link"
       MYCPPFLAGS="$MYCPPFLAGS $test_cflags"
-      add_def FEAT_NTS
     fi
   fi
+fi
+
+if [ $feat_nts = "1" ] && [ $try_wolfssl = "1" ] && ! grep '#define HAVE_SIV' config.h > /dev/null; then
+  if [ "$HASH_OBJ" = "hash_wolfssl.o" ]; then
+    test_cflags=""
+    test_link=""
+  else
+    test_cflags="`pkg_config --cflags wolfssl`"
+    test_link="`pkg_config --libs wolfssl`"
+  fi
+  if test_code 'SIV in wolfSSL' 'wolfssl/options.h wolfssl/wolfcrypt/aes.h' "$test_cflags" "$test_link $LIBS" \
+    'wc_AesSivEncrypt(NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, NULL);'
+  then
+    EXTRA_OBJECTS="$EXTRA_OBJECTS siv_wolfssl.o tls_wolfssl.o"
+    LIBS="$LIBS $test_link"
+    MYCPPFLAGS="$MYCPPFLAGS $test_cflags"
+    add_def HAVE_SIV
+  fi
+fi
+
+if [ $feat_nts = "1" ] && grep '#define HAVE_SIV' config.h > /dev/null; then
+  EXTRA_OBJECTS="$EXTRA_OBJECTS nts_ke_client.o nts_ke_server.o nts_ke_session.o"
+  EXTRA_OBJECTS="$EXTRA_OBJECTS nts_ntp_auth.o nts_ntp_client.o nts_ntp_server.o"
+  add_def FEAT_NTS
 fi
 
 SYSCONFDIR=/etc

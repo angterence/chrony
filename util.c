@@ -38,6 +38,9 @@
 #include "logging.h"
 #include "memory.h"
 #include "util.h"
+
+#include <net/if.h>
+
 #include "hash.h"
 
 #define NSEC_PER_SEC 1000000000
@@ -322,8 +325,16 @@ UTI_IPToString(const IPAddr *addr)
       break;
     case IPADDR_INET6:
       ip6 = addr->addr.in6;
+      uint16_t interface = addr->interface;
 #ifdef FEAT_IPV6
+      // compose the IPv6
       inet_ntop(AF_INET6, ip6, result, BUFFER_LENGTH);
+      // if used, append the interface name
+      if (interface != 0) {
+        char* result_if_delimiter = result + strlen(result);
+        *result_if_delimiter = '%';
+        if_indextoname(interface, result_if_delimiter + 1);
+      }
 #else
       assert(BUFFER_LENGTH >= 40);
       for (a = 0; a < 8; a++)
@@ -352,15 +363,35 @@ UTI_StringToIP(const char *addr, IPAddr *ip)
 
   if (inet_pton(AF_INET, addr, &in4) > 0) {
     ip->family = IPADDR_INET4;
-    ip->_pad = 0;
+    ip->interface = 0;
     ip->addr.in4 = ntohl(in4.s_addr);
     return 1;
   }
 
 #ifdef FEAT_IPV6
-  if (inet_pton(AF_INET6, addr, &in6) > 0) {
+  // split the address into an IP and an interface.
+  char addr_ip[INET6_ADDRSTRLEN];
+  strncpy(addr_ip, addr, sizeof(addr_ip));
+  char *addr_if = strchr(addr_ip, '%');
+
+  // prepare the interface index
+  unsigned int addr_if_index = 0;
+  // check if an interface is specified
+  if (addr_if != NULL) {
+    // split the string into two string, by replacing the "%" into an end-of-string
+    *addr_if = '\0';
+    // the interface will now start on the next character
+    addr_if++;
+
+    // get the index of the interface
+    addr_if_index = if_nametoindex(addr_if);
+    if (addr_if_index == 0)
+      return 0;
+  }
+
+  if (inet_pton(AF_INET6, addr_ip, &in6) > 0) {
     ip->family = IPADDR_INET6;
-    ip->_pad = 0;
+    ip->interface = addr_if_index;
     memcpy(ip->addr.in6, in6.s6_addr, sizeof (ip->addr.in6));
     return 1;
   }
@@ -386,7 +417,7 @@ UTI_StringToIdIP(const char *addr, IPAddr *ip)
 {
   if (sscanf(addr, "ID#%"SCNu32, &ip->addr.id) == 1) {
     ip->family = IPADDR_ID;
-    ip->_pad = 0;
+    ip->interface = 0;
     return 1;
   }
 
@@ -487,6 +518,7 @@ UTI_IPHostToNetwork(const IPAddr *src, IPAddr *dest)
       break;
     case IPADDR_INET6:
       memcpy(dest->addr.in6, src->addr.in6, sizeof (dest->addr.in6));
+      dest->interface = src->interface;
       break;
     case IPADDR_ID:
       dest->addr.id = htonl(src->addr.id);
@@ -502,7 +534,7 @@ void
 UTI_IPNetworkToHost(const IPAddr *src, IPAddr *dest)
 {
   dest->family = ntohs(src->family);
-  dest->_pad = 0;
+  dest->interface = src->interface;
 
   switch (dest->family) {
     case IPADDR_INET4:

@@ -28,6 +28,7 @@
 #define GOT_SYS_LINUX_H
 
 #include "sys.h"
+#include "array.h"
 
 extern void SYS_Linux_Initialise(void);
 
@@ -48,5 +49,7 @@ extern int SYS_Linux_SetPHCExtTimestamping(int fd, int pin, int channel,
                                            int rising, int falling, int enable);
 
 extern int SYS_Linux_ReadPHCExtTimestamp(int fd, struct timespec *phc_ts, int *channel);
+
+extern void SYS_Linux_SetAffinity(ARR_Instance CpuAffinityList);
 
 #endif  /* GOT_SYS_LINUX_H */

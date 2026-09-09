@@ -44,6 +44,8 @@
 #include "cmdparse.h"
 #include "util.h"
 
+#include <sched.h>
+
 /* ================================================== */
 
 #define MAX_LINE_LENGTH 2048
@@ -256,6 +258,7 @@ static double tempcomp_T0, tempcomp_k0, tempcomp_k1, tempcomp_k2;
 
 static int sched_priority = 0;
 static int lock_memory = 0;
+static ARR_Instance cpu_affinity_list; /* array of int */
 
 /* Leap second handling mode */
 static REF_LeapMode leapsec_mode = REF_LeapModeSystem;
@@ -465,6 +468,8 @@ CNF_Initialise(int r, int client_only)
     pidfile = Strdup(DEFAULT_PID_FILE);
   }
 
+  cpu_affinity_list = ARR_CreateInstance(sizeof (int));
+
   SCK_GetAnyLocalIPAddress(IPADDR_INET4, &bind_address4);
   SCK_GetAnyLocalIPAddress(IPADDR_INET6, &bind_address6);
   SCK_GetAnyLocalIPAddress(IPADDR_INET4, &bind_acq_address4);
@@ -515,6 +520,8 @@ CNF_Finalise(void)
   ARR_DestroyInstance(nts_server_key_files);
   ARR_DestroyInstance(nts_trusted_certs_paths);
   ARR_DestroyInstance(nts_trusted_certs_ids);
+
+  ARR_DestroyInstance(cpu_affinity_list);
 
   Free(drift_file);
   Free(dumpdir);
@@ -643,6 +650,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_confdir(p);
   } else if (!strcasecmp(command, "corrtimeratio")) {
     parse_double(p, &correction_time_ratio);
+  } else if (!strcasecmp(command, "cpu_affinity")) {
+    parse_ints(p, cpu_affinity_list, 0, CPU_SETSIZE);
   } else if (!strcasecmp(command, "deny")) {
     parse_allow_deny(p, ntp_restrictions, 0);
   } else if (!strcasecmp(command, "driftfile")) {
@@ -2653,6 +2662,14 @@ int
 CNF_GetLockMemory(void)
 {
   return lock_memory;
+}
+
+/* ================================================== */
+
+ARR_Instance
+CNF_GetCpuAffinity(void)
+{
+  return cpu_affinity_list;
 }
 
 /* ================================================== */

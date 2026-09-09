@@ -29,6 +29,8 @@
 #ifndef GOT_SYS_H
 #define GOT_SYS_H
 
+#include "array.h"
+
 /* Called at the start of the run to do initialisation */
 extern void SYS_Initialise(int clock_control);
 
@@ -50,5 +52,6 @@ extern void SYS_EnableSystemCallFilter(int level, SYS_ProcessContext context);
 
 extern void SYS_SetScheduler(int SchedPriority);
 extern void SYS_LockMemory(void);
+extern void SYS_SetAffinity(ARR_Instance cpu_affinity_list);
 
 #endif /* GOT_SYS_H */

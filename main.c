@@ -5,20 +5,20 @@
  * Copyright (C) Richard P. Curnow  1997-2003
  * Copyright (C) John G. Hasler  2009
  * Copyright (C) Miroslav Lichvar  2012-2020
- * 
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
  * published by the Free Software Foundation.
- * 
+ *
  * This program is distributed in the hope that it will be useful, but
  * WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- * 
+ *
  **********************************************************************
 
   =======================================================================
@@ -103,8 +103,9 @@ delete_pidfile(void)
   if (!pidfile)
     return;
 
-  if (!UTI_RemoveFile(NULL, pidfile, NULL))
-    ;
+  if (!UTI_RemoveFile(NULL, pidfile, NULL)) {
+    LOG(LOGS_WARN, "Failed to remove pidfile %s: %s", pidfile, strerror(errno));
+  }
 }
 
 /* ================================================== */
@@ -148,7 +149,7 @@ void
 MAI_CleanupAndExit(void)
 {
   if (!initialised) exit(exit_status);
-  
+
   notify_system_manager(0);
 
   LCL_CancelOffsetCorrection();
@@ -184,7 +185,7 @@ MAI_CleanupAndExit(void)
   PRV_Finalise();
 
   delete_pidfile();
-  
+
   CNF_Finalise();
   HSH_Finalise();
   LOG_Finalise();
@@ -315,7 +316,7 @@ check_pidfile(void)
   const char *pidfile = CNF_GetPidFile();
   FILE *in;
   int pid, count;
-  
+
   if (!pidfile)
     return;
 
@@ -325,7 +326,7 @@ check_pidfile(void)
 
   count = fscanf(in, "%d", &pid);
   fclose(in);
-  
+
   if (count != 1)
     return;
 
@@ -625,9 +626,9 @@ int main
   } else if (system_log) {
     LOG_OpenSystemLog();
   }
-  
+
   LOG_SetMinSeverity(debug >= 2 ? LOGS_DEBUG : log_severity);
-  
+
   LOG(LOGS_INFO, "chronyd version %s starting (%s)", CHRONY_VERSION, CHRONYD_FEATURES);
 
   DNS_SetAddressFamily(address_family);

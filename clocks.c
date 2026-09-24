@@ -661,6 +661,9 @@ CLK_Close(CLK_Instance inst)
 
   SYS_FinaliseClockDriver(&inst->driver, inst->control);
 
+  if (inst->fd >= 0)
+    close(inst->fd);
+
   Free(inst->name);
   Free(inst);
 }

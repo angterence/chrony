@@ -98,6 +98,178 @@ static double sys_hz;
    updated in the kernel */
 static int tick_update_hz;
 
+#define NSEC_PER_SEC 1000000000
+#define CLOCK_READINGS 64
+
+/* ================================================== */
+
+static int open_phc(const char *device, int flags);
+static int get_phc_readings(int fd, clockid_t sys_clock, int nocrossts, int max_readings,
+                            int *reading_mode, struct timespec tss[][3]);
+
+/* ================================================== */
+
+int
+SYS_Linux_OpenClock(const char *name, int *control, clockid_t *id, int *fd, int *is_system)
+{
+#ifdef CLOCK_MONOTONIC_RAW
+  if (strcmp(name, "SYS:MONOTONIC_RAW") == 0) {
+    *control = 0;
+    *id = CLOCK_MONOTONIC_RAW;
+    *is_system = 1;
+    return 1;
+  }
+#endif
+
+  if (strncmp(name, "SYS:AUX", 7) == 0) {
+    /* CLOCK_AUX0-CLOCK_AUX7 following linux/time.h */
+    if (strlen(name + 7) != 1 || name[7] < '0' || name[7] > '7') {
+      LOG(LOGS_ERR, "Invalid clock %s", name);
+      return 0;
+    }
+    *id = 16 + (name[7] - '0');
+    *is_system = 1;
+    return 1;
+  }
+
+#if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
+  if (strncmp(name, "PHC:", 4) == 0) {
+    *fd = open_phc(name + 4, control ? O_RDWR : O_RDONLY);
+    if (*fd < 0) {
+      LOG(LOGS_ERR, "Could not open PHC clock %s", name + 4);
+      return 0;
+    }
+
+    /* Following linux/posix-timers_types.h */
+    *id = (((unsigned int)~*fd) << 3) | 3;
+    *is_system = 0;
+    return 1;
+  }
+#endif
+
+  LOG(LOGS_ERR, "Unsupported clock %s", name);
+  return 0;
+}
+
+/* ================================================== */
+
+static int
+compare_ints(const void *a, const void *b)
+{
+  return *(const int *)a - *(const int *)b;
+}
+
+/* ================================================== */
+
+/* The Linux clock_getres() is not usable, because it reports the internal
+   timer resolution, which is 1 ns when high-resolution timers are enabled,
+   even when using a lower-resolution clocksource. Also, clock_getres() is not
+   available for PHCs.
+
+   Try to measure the actual resolution of the system clock by performing a
+   varying amount of busy work between clock readings and finding the minimum
+   change in the measured interval.  Require a change of at least two
+   nanoseconds to ignore errors caused by conversion to timespec.  If measuring
+   a system clock, use the raw monotonic clock to avoid the impact of potential
+   frequency changes due to NTP adjustments made by other processes, and the
+   kernel dithering of the 32-bit multiplier. */
+
+int
+SYS_Linux_GetClockResolution(CLK_Instance clock)
+{
+  int i, j, b, busy, diffs[CLOCK_READINGS - 1], diff2, min;
+  struct timespec start_ts, ts[CLOCK_READINGS];
+  uint32_t acc;
+  clockid_t id;
+
+  if (CLK_IsSystem(clock))
+    id = CLOCK_MONOTONIC_RAW;
+  else
+    id = CLK_GetId(clock);
+
+  if (clock_gettime(id, &start_ts) < 0)
+    return 0;
+
+  for (acc = 0, busy = 1; busy < 100000; busy = busy * 3 / 2 + 1) {
+    for (i = 0, b = busy * CLOCK_READINGS; i < CLOCK_READINGS; i++, b -= busy) {
+      if (clock_gettime(id, &ts[i]) < 0)
+        return 0;
+
+      for (j = b; j > 0; j--)
+        acc += (acc & 1) + (uint32_t)ts[i].tv_nsec;
+    }
+
+    /* Give up after 0.1 seconds */
+    if (UTI_DiffTimespecsToDouble(&ts[CLOCK_READINGS - 1], &start_ts) > 0.1) {
+      DEBUG_LOG("Measurement too slow");
+      return 0;
+    }
+
+    for (i = 0; i < CLOCK_READINGS - 1; i++) {
+      diffs[i] = NSEC_PER_SEC * (ts[i + 1].tv_sec - ts[i].tv_sec) +
+                 (ts[i + 1].tv_nsec - ts[i].tv_nsec);
+
+      /* Make sure the differences are sane.  A resolution larger than the
+         reading time will be measured in measure_clock_read_delay(). */
+      if (diffs[i] <= 0 || diffs[i] > NSEC_PER_SEC)
+        return 0;
+    }
+
+    /* Sort the differences and keep values unique within 1 ns from the
+       first half of the array, which are less likely to be impacted by CPU
+       interruptions */
+    qsort(diffs, CLOCK_READINGS - 1, sizeof (diffs[0]), compare_ints);
+    for (i = 1, j = 0; i < CLOCK_READINGS / 2; i++) {
+      if (diffs[j] + 1 < diffs[i])
+        diffs[++j] = diffs[i];
+    }
+    j++;
+
+#if 0
+    for (i = 0; i < j; i++)
+      DEBUG_LOG("busy %d diff %d %d", busy, i, diffs[i]);
+#endif
+
+    /* Require at least three unique differences to be more confident
+       with the result */
+    if (j < 3)
+      continue;
+
+    /* Find the smallest difference between the unique differences */
+    for (i = 1, min = 0; i < j; i++) {
+      diff2 = diffs[i] - diffs[i - 1];
+      if (min == 0 || min > diff2)
+        min = diff2;
+    }
+
+    if (min == 0)
+      continue;
+
+    /* Prevent the compiler from optimising the busy work out */
+    if (acc == 0)
+      min += 1;
+
+    return min;
+  }
+
+  return 0;
+}
+
+/* ================================================== */
+
+int
+SYS_Linux_GetClockReadings(CLK_Instance clock1, CLK_Instance clock2,
+                           int max_readings, int *mode, struct timespec tss[][3])
+{
+#if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
+  if (CLK_IsSystem(clock1) && !CLK_IsSystem(clock2))
+    return get_phc_readings(CLK_GetFd(clock2), CLK_GetId(clock1),
+                            !CLK_GetCrossTimestamping(clock2), max_readings, mode, tss);
+#endif
+
+  return 0;
+}
+
 /* ================================================== */
 /* Positive means currently fast of true time, i.e. jump backwards */
 
@@ -759,7 +931,7 @@ SYS_Linux_CheckKernelVersion(int req_major, int req_minor)
 #if defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING)
 
 static int
-get_phc_readings(int phc_fd, clockid_t sys_clock, int max_samples, struct timespec ts[][3])
+get_simple_phc_readings(int phc_fd, clockid_t sys_clock, int max_samples, struct timespec ts[][3])
 {
   struct ptp_sys_offset sys_off;
   int i;
@@ -939,8 +1111,8 @@ open_phc_by_iface_name(const char *iface, int flags)
 
 /* ================================================== */
 
-int
-SYS_Linux_OpenPHC(const char *device, int flags)
+static int
+open_phc(const char *device, int flags)
 {
   int phc_fd = -1;
 
@@ -967,9 +1139,9 @@ SYS_Linux_OpenPHC(const char *device, int flags)
 
 /* ================================================== */
 
-int
-SYS_Linux_GetPHCReadings(int fd, clockid_t sys_clock, int nocrossts, int *reading_mode,
-                         int max_readings, struct timespec tss[][3])
+static int
+get_phc_readings(int fd, clockid_t sys_clock, int nocrossts, int max_readings,
+                 int *reading_mode, struct timespec tss[][3])
 {
   int r = 0;
 
@@ -980,7 +1152,7 @@ SYS_Linux_GetPHCReadings(int fd, clockid_t sys_clock, int nocrossts, int *readin
              (r = get_extended_phc_readings(fd, sys_clock, max_readings, tss)) > 0) {
     *reading_mode = 3;
   } else if ((*reading_mode == 1 || *reading_mode == 0) &&
-             (r = get_phc_readings(fd, sys_clock, max_readings, tss)) > 0) {
+             (r = get_simple_phc_readings(fd, sys_clock, max_readings, tss)) > 0) {
     *reading_mode = 1;
   }
 

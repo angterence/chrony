@@ -50,6 +50,48 @@
 
 /* ================================================== */
 
+int
+SYS_OpenClock(const char *name, int *control, clockid_t *id, int *fd, int *is_system)
+{
+#if LINUX
+  return SYS_Linux_OpenClock(name, control, id, fd, is_system);
+#else
+  return 0;
+#endif
+}
+
+/* ================================================== */
+
+int
+SYS_GetClockResolution(CLK_Instance clock)
+{
+#if LINUX
+  return SYS_Linux_GetClockResolution(clock);
+#else
+  struct timespec res;
+
+  if (clock_getres(CLK_GetId(inst), &res) < 0)
+    return 0;
+
+  return NSEC_PER_SEC * res.tv_sec + res.tv_nsec;
+#endif
+}
+
+/* ================================================== */
+
+int
+SYS_GetClockReadings(CLK_Instance clock1, CLK_Instance clock2,
+                     int max_readings, int *mode, struct timespec tss[][3])
+{
+#if LINUX
+  return SYS_Linux_GetClockReadings(clock1, clock2, max_readings, mode, tss);
+#else
+  return 0;
+#endif
+}
+
+/* ================================================== */
+
 void
 SYS_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock, int control)
 {

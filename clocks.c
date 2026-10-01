@@ -42,10 +42,6 @@
 #include "sys.h"
 #include "sys_null.h"
 
-#if defined(LINUX)
-#include "sys_linux.h"
-#endif
-
 #define INVALID_CLOCK_FD -1
 
 /* Number of readings per HW clock sample */
@@ -96,7 +92,7 @@ struct tracking {
   CLK_Instance to;
   HCL_Instance hwclock;
   SCH_TimeoutID hwclock_timeout_id;
-  int phc_mode;
+  int reading_mode;
   int in_update;
 };
 
@@ -122,137 +118,6 @@ static LOG_FileID log_id;
 /* ================================================== */
 
 static int update_tracking(struct tracking *tracking, struct timespec *now);
-
-/* ================================================== */
-
-/* Ask the system for the resolution of the system clock.  The Linux
-   clock_getres() is not usable, because it reports the internal timer
-   resolution, which is 1 ns when high-resolution timers are enabled,
-   even when using a lower-resolution clocksource. */
-
-static int
-get_resolution(CLK_Instance inst)
-{
-#ifndef LINUX
-  struct timespec res;
-
-  if (clock_getres(CLK_GetId(inst), &res) < 0)
-    return 0;
-
-  return NSEC_PER_SEC * res.tv_sec + res.tv_nsec;
-#else
-  return 0;
-#endif
-}
-
-/* ================================================== */
-
-#if defined(LINUX) && defined(CLOCK_MONOTONIC_RAW)
-
-static int
-compare_ints(const void *a, const void *b)
-{
-  return *(const int *)a - *(const int *)b;
-}
-
-#define READINGS 64
-
-/* On Linux, try to measure the actual resolution of the system clock by
-   performing a varying amount of busy work between clock readings and finding
-   the minimum change in the measured interval.  Require a change of at least
-   two nanoseconds to ignore errors caused by conversion to timespec.  If
-   measuring a system clock, use the raw monotonic clock to avoid the impact of
-   potential frequency changes due to NTP adjustments made by other processes,
-   and the kernel dithering of the 32-bit multiplier. */
-
-static int
-measure_resolution(CLK_Instance inst)
-{
-  int i, j, b, busy, diffs[READINGS - 1], diff2, min;
-  struct timespec start_ts, ts[READINGS];
-  uint32_t acc;
-  clockid_t id;
-
-  if (CLK_IsSystem(inst))
-    id = CLOCK_MONOTONIC_RAW;
-  else
-    id = CLK_GetId(inst);
-
-  if (clock_gettime(id, &start_ts) < 0)
-    return 0;
-
-  for (acc = 0, busy = 1; busy < 100000; busy = busy * 3 / 2 + 1) {
-    for (i = 0, b = busy * READINGS; i < READINGS; i++, b -= busy) {
-      if (clock_gettime(id, &ts[i]) < 0)
-        return 0;
-
-      for (j = b; j > 0; j--)
-        acc += (acc & 1) + (uint32_t)ts[i].tv_nsec;
-    }
-
-    /* Give up after 0.1 seconds */
-    if (UTI_DiffTimespecsToDouble(&ts[READINGS - 1], &start_ts) > 0.1) {
-      DEBUG_LOG("Measurement too slow");
-      return 0;
-    }
-
-    for (i = 0; i < READINGS - 1; i++) {
-      diffs[i] = NSEC_PER_SEC * (ts[i + 1].tv_sec - ts[i].tv_sec) +
-                 (ts[i + 1].tv_nsec - ts[i].tv_nsec);
-
-      /* Make sure the differences are sane.  A resolution larger than the
-         reading time will be measured in measure_clock_read_delay(). */
-      if (diffs[i] <= 0 || diffs[i] > NSEC_PER_SEC)
-        return 0;
-    }
-
-    /* Sort the differences and keep values unique within 1 ns from the
-       first half of the array, which are less likely to be impacted by CPU
-       interruptions */
-    qsort(diffs, READINGS - 1, sizeof (diffs[0]), compare_ints);
-    for (i = 1, j = 0; i < READINGS / 2; i++) {
-      if (diffs[j] + 1 < diffs[i])
-        diffs[++j] = diffs[i];
-    }
-    j++;
-
-#if 0
-    for (i = 0; i < j; i++)
-      DEBUG_LOG("busy %d diff %d %d", busy, i, diffs[i]);
-#endif
-
-    /* Require at least three unique differences to be more confident
-       with the result */
-    if (j < 3)
-      continue;
-
-    /* Find the smallest difference between the unique differences */
-    for (i = 1, min = 0; i < j; i++) {
-      diff2 = diffs[i] - diffs[i - 1];
-      if (min == 0 || min > diff2)
-        min = diff2;
-    }
-
-    if (min == 0)
-      continue;
-
-    /* Prevent the compiler from optimising the busy work out */
-    if (acc == 0)
-      min += 1;
-
-    return min;
-  }
-
-  return 0;
-}
-
-#else
-static int
-measure_clock_resolution(void)
-{
-  return 0;
-}
-#endif
 
 /* ================================================== */
 
@@ -306,10 +171,7 @@ measure_precision(CLK_Instance inst)
 {
   int res, delay, prec;
 
-  res = get_resolution(inst);
-  if (res <= 0)
-    res = measure_resolution(inst);
-
+  res = SYS_GetClockResolution(inst);
   delay = measure_read_delay(inst);
 
   if (res > 0)
@@ -361,7 +223,7 @@ get_tracking(CLK_Instance inst1, CLK_Instance inst2)
                                          UTI_Log2ToDouble(inst1->minpoll),
                                          CLK_GetPrecision(inst1));
   tracking->hwclock_timeout_id = 0;
-  tracking->phc_mode = 0;
+  tracking->reading_mode = 0;
   tracking->in_update = 0;
 
   ARR_AppendElement(tracking_map, &tracking);
@@ -539,34 +401,7 @@ CLK_Open(const char *name, int control)
   } else if (strcmp(name, "SYS:MONOTONIC") == 0) {
     inst->id = CLOCK_MONOTONIC;
     inst->control = 0;
-#ifdef CLOCK_MONOTONIC_RAW
-  } else if (strcmp(name, "SYS:MONOTONIC_RAW") == 0) {
-    inst->id = CLOCK_MONOTONIC_RAW;
-    inst->control = 0;
-#endif
-#ifdef LINUX
-  } else if (strncmp(name, "SYS:AUX", 7) == 0) {
-    /* CLOCK_AUX0-CLOCK_AUX7 following linux/time.h */
-    if (strlen(name + 7) != 1 || name[7] < '0' || name[7] > '7') {
-      LOG(LOGS_ERR, "Invalid clock %s", name);
-      goto error;
-    }
-    inst->id = 16 + (name[7] - '0');
-#endif
-#if defined(LINUX) && (defined(FEAT_PHC) || defined(HAVE_LINUX_TIMESTAMPING))
-  } else if (strncmp(name, "PHC:", 4) == 0) {
-    inst->fd = SYS_Linux_OpenPHC(name + 4, control ? O_RDWR : O_RDONLY);
-    if (inst->fd < 0) {
-      LOG(LOGS_ERR, "Could not open PHC clock %s", name + 4);
-      goto error;
-    }
-
-    /* Following linux/posix-timers_types.h */
-    inst->id = (((unsigned int)~inst->fd) << 3) | 3;
-    inst->system = 0;
-#endif
-  } else {
-    LOG(LOGS_ERR, "Unsupported clock %s", name);
+  } else if (!SYS_OpenClock(name, &inst->control, &inst->id, &inst->fd, &inst->system)) {
     goto error;
   }
 
@@ -692,6 +527,14 @@ void
 CLK_DisableCrossTimestamping(CLK_Instance inst)
 {
   inst->nocrossts = 1;
+}
+
+/* ================================================== */
+
+int
+CLK_GetCrossTimestamping(CLK_Instance inst)
+{
+  return !inst->nocrossts;
 }
 
 /* ================================================== */
@@ -1188,8 +1031,8 @@ CLK_ReadTimePair(CLK_Instance inst1, CLK_Instance inst2,
   }
 
   if (inst1->system && !inst2->system) {
-    n_readings = SYS_Linux_GetPHCReadings(inst2->fd, inst1->id, inst2->nocrossts,
-                                          &tracking->phc_mode, HWCLOCK_READINGS, readings);
+    n_readings = SYS_GetClockReadings(inst1, inst2, HWCLOCK_READINGS,
+                                      &tracking->reading_mode, readings);
   } else {
     n_readings = get_clock_readings(inst1, inst2, HWCLOCK_READINGS, readings);
   }

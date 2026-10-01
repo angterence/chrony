@@ -30,6 +30,14 @@
 #include "clocks.h"
 #include "sys.h"
 
+extern int SYS_Linux_OpenClock(const char *name, int *control,
+                               clockid_t *id, int *fd, int *is_system);
+
+extern int SYS_Linux_GetClockResolution(CLK_Instance clock);
+
+extern int SYS_Linux_GetClockReadings(CLK_Instance clock1, CLK_Instance clock2,
+                                      int max_readings, int *mode, struct timespec tss[][3]);
+
 extern void SYS_Linux_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock);
 
 extern void SYS_Linux_FinaliseClockDriver(struct clk_Driver *driver);
@@ -39,11 +47,6 @@ extern void SYS_Linux_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context)
 extern void SYS_Linux_EnableSystemCallFilter(int level, SYS_ProcessContext context);
 
 extern int SYS_Linux_CheckKernelVersion(int req_major, int req_minor);
-
-extern int SYS_Linux_OpenPHC(const char *device, int flags);
-
-extern int SYS_Linux_GetPHCReadings(int fd, clockid_t sys_clock, int nocrossts, int *reading_mode,
-                                    int max_readings, struct timespec tss[][3]);
 
 extern int SYS_Linux_SetPHCExtTimestamping(int fd, int pin, int channel,
                                            int rising, int falling, int enable);

@@ -58,6 +58,8 @@ extern void CLK_SetSamples(CLK_Instance inst, int min_samples, int max_samples);
 
 extern void CLK_DisableCrossTimestamping(CLK_Instance inst);
 
+extern int CLK_GetCrossTimestamping(CLK_Instance inst);
+
 extern clockid_t CLK_GetId(CLK_Instance inst);
 
 extern int CLK_GetFd(CLK_Instance inst);

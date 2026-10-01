@@ -82,4 +82,4 @@ struct clk_Driver {
   clk_SetSyncStatus set_sync_status;
 };
 
-#endif /* GOT_LOCALP_H */
+#endif /* GOT_CLOCKS_PRIV_H */

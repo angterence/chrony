@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+
+. ./test.common
+
+test_start "clock directive"
+
+check_config_h 'HAVE_LINUX_TIMESTAMPING 1' || test_skip
+
+client_chronyd_options="-d"
+jitter=1e-7
+min_sync_time=120
+max_sync_time=145
+
+for freq_offset in -1e-4 1e-4 -1e-2 1e-2; do
+	export CLKNETSIM_TIMESTAMPING=1
+	clocks="REALTIME,AUX0"
+	client_conf="clock SYS:AUX0 main"
+	time_offset=$(awk "BEGIN {print $default_time_offset + $freq_offset * -130}")
+	extra_clknetsim_conf="
+	node2_offset2 = $(awk "BEGIN {print 2e-1 + 2e-4 * -130}")
+	node2_freq2 = $(get_wander_expr 2e-4 $wander)"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "2" || test_fail
+	if check_config_h 'FEAT_DEBUG 1'; then
+		check_log_messages "correction.*premature=0" 100 300 || test_fail
+		check_log_messages "correction.*premature=[3-9]" 0 1 || test_fail
+	fi
+
+	client_conf="clock SYS:AUX0
+	clock SYS:REALTIME main"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "1 2" || test_fail
+
+	client_conf="clock SYS:AUX0 main
+	clock SYS:REALTIME"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "1 2" || test_fail
+
+	clocks="REALTIME,ptp2"
+	client_conf="clock PHC:/dev/ptp2 main"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "2" || test_fail
+
+	clocks="REALTIME,ptp2"
+	client_conf="clock PHC:/dev/ptp2 main shadow"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "2" || test_fail
+
+	clocks="REALTIME,ptp2"
+	client_conf="clock PHC:/dev/ptp2 main
+	clock SYS:MONOTONIC_RAW shadow"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "2" || test_fail
+
+	export CLKNETSIM_TIMESTAMPING=2
+	clocks="REALTIME,eth0"
+
+	client_conf="clock PHC:eth0 main
+	hwtimestamp eth0"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "2" || test_fail
+
+	client_conf="clock PHC:eth0 main
+	clock SYS:MONOTONIC shadow
+	hwtimestamp eth0"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "2" || test_fail
+
+	client_conf="clock PHC:eth0 main
+	clock SYS:MONOTONIC_RAW shadow
+	hwtimestamp eth0
+	logdir tmp
+	log clocks"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+	check_sync "" "2" || test_fail
+
+	check_file_messages "SYS:MONOTONIC_RAW" 0 0 clocks.log || test_fail
+	check_file_messages "PHC:eth0" 100 300 clocks.log || test_fail
+
+	rm -f tmp/clocks.log
+
+	clocks="REALTIME"
+	server_conf="clockprecision 1e-9"
+	client_conf="clock SYS:MONOTONIC_RAW main precision 1e-9
+	logdir tmp
+	log clocks tracking statistics"
+
+	run_test || test_fail
+	check_chronyd_exit || test_fail
+	check_source_selection || test_fail
+	check_packet_interval || test_fail
+
+	#TODO: check stddev and offsets in logs
+	check_file_messages "SYS:MONOTONIC_RAW" 100 300 clocks.log || test_fail
+	rm -f tmp/clocks.log tmp/tracking.log tmp/statistics.log
+
+	server_conf=""
+done
+
+CLKNETSIM_TIMESTAMPING=2
+time_offset=$default_time_offset
+freq_offset=1e-2
+extra_clknetsim_conf="
+node2_offset2 = -2e-1
+node2_freq2 = $(get_wander_expr 2e-4 $wander)
+node2_offset3 = 3e-1
+node2_freq3 = $(get_wander_expr 3e-4 $wander)
+node2_offset4 = -3e-1
+node2_freq4 = $(get_wander_expr 7e-4 $wander)"
+clocks="REALTIME,AUX0,ptp2,ptp3"
+min_sync_time=130
+max_sync_time=150
+
+client_conf="
+clock SYS:REALTIME main
+clock SYS:AUX0
+clock SYS:MONOTONIC_RAW
+clock PHC:/dev/ptp2 maxsamples 2
+clock PHC:/dev/ptp3"
+
+run_test || test_fail
+check_chronyd_exit || test_fail
+check_source_selection || test_fail
+check_packet_interval || test_fail
+check_sync "" "1 2 3 4" || test_fail
+
+client_conf="
+clock SYS:REALTIME
+clock SYS:AUX0
+clock SYS:MONOTONIC_RAW
+clock PHC:/dev/ptp2 maxsamples 2
+clock PHC:/dev/ptp3 main"
+
+run_test || test_fail
+check_chronyd_exit || test_fail
+check_source_selection || test_fail
+check_packet_interval || test_fail
+check_sync "" "1 2 3 4" || test_fail
+
+client_conf="
+clock SYS:REALTIME main
+clock SYS:AUX0
+clock SYS:MONOTONIC_RAW
+clock PHC:/dev/ptp2
+clock PHC:/dev/ptp3
+makestep 0.05 1"
+min_sync_time=128
+max_sync_time=131
+
+run_test || test_fail
+check_chronyd_exit || test_fail
+check_source_selection || test_fail
+check_packet_interval || test_fail
+check_sync "" "1 2 3 4" || test_fail
+
+#TODO: add test with smaller maxupdateskew to skip first freq update
+
+client_conf="
+clock SYS:REALTIME main
+clock SYS:AUX0
+clock SYS:MONOTONIC_RAW
+clock PHC:/dev/ptp2
+clock PHC:/dev/ptp3
+makestep 0.3 1
+maxslewrate 1000"
+min_sync_time=120
+max_sync_time=350
+
+run_test || test_fail
+check_chronyd_exit || test_fail
+check_source_selection || test_fail
+check_packet_interval || test_fail
+min_sync_time=128 max_sync_time=131 check_sync "" "1 3" || test_fail
+min_sync_time=300 max_sync_time=305 check_sync "" "2" || test_fail
+min_sync_time=337 max_sync_time=342 check_sync "" "4" || test_fail
+
+client_conf="
+clock SYS:REALTIME
+clock SYS:AUX0
+clock SYS:MONOTONIC_RAW
+clock PHC:/dev/ptp2 main
+clock PHC:/dev/ptp3
+makestep 0.3 1
+maxslewrate 1000"
+min_sync_time=120
+max_sync_time=350
+
+run_test || test_fail
+check_chronyd_exit || test_fail
+check_source_selection || test_fail
+check_packet_interval || test_fail
+min_sync_time=128 max_sync_time=131 check_sync "" "1 3" || test_fail
+min_sync_time=300 max_sync_time=305 check_sync "" "2" || test_fail
+min_sync_time=337 max_sync_time=342 check_sync "" "4" || test_fail
+#TODO: check hwclock resets
+
+clocks="REALTIME,ptp2"
+limit=1000
+refclock_jitter=$jitter
+min_sync_time=45
+max_sync_time=70
+client_server_options="noselect"
+
+if check_config_h 'FEAT_REFCLOCK 1'; then
+	for freq_offset in -1e-3 1e-3; do
+		# TODO add PHC, PHC pps, and RTC
+		# SHM 0 is always tied to REALTIME
+		for target in 1 2; do
+			[ $target -eq 1 ] && clock_opt="" || clock_opt="clock PHC:/dev/ptp2"
+			for refclock in "refclock SHM 0 $clock_opt" \
+					"refclock SHM 1 $clock_opt" \
+					"refclock PPS /dev/pps0 lock NMEA $clock_opt
+					 refclock SHM 0 refid NMEA noselect $clock_opt"; do
+				extra_clknetsim_conf="
+				node2_offset2 = 2e-1
+				node2_freq2 = $(get_wander_expr 2e-4 $wander)
+				node2_refclock_target = $target"
+				# TODO use MONOTONIC when multi-tracking supported
+				client_conf="clock PHC:/dev/ptp2 main
+				clock SYS:REALTIME shadow
+				$refclock"
+
+				run_test || test_fail
+				check_chronyd_exit || test_fail
+				check_source_selection || test_fail
+				check_sync "" "2" || test_fail
+			done
+		done
+	done
+fi
+
+test_pass

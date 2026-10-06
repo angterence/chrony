@@ -65,6 +65,19 @@ static double last_select_ts_err;
 static double last_select_ts_mono;
 static uint32_t last_select_ts_mono_ns;
 
+#define JUMP_DETECT_THRESHOLD 10
+
+#define MAX_SYSTEM_TIMEOUT_ERROR 0.2
+#define MIN_SYSTEM_TIMEOUT_FREQ (1.0 - MAX_SYSTEM_TIMEOUT_ERROR)
+#define MAX_SYSTEM_TIMEOUT_FREQ (1.0 + MAX_SYSTEM_TIMEOUT_ERROR)
+#define MIN_SYSTEM_TIMEOUT_CORRECTION_INTERVAL 1.0
+#define MAX_INACCURATE_SYSTEM_TIMEOUT (JUMP_DETECT_THRESHOLD / MAX_SYSTEM_TIMEOUT_ERROR)
+
+/* Flag indicating that select() timeouts match the local clock, and
+   an estimated factor that can be applied to correct them if not */
+static int system_timer_accurate;
+static double system_timer_correction;
+
 /* ================================================== */
 
 /* Variables to handler the timer queue */
@@ -140,10 +153,16 @@ SCH_Initialise(void)
 
   LCL_AddParameterChangeHandler(handle_slew, NULL);
 
+  /* This handler needs to be the first one invoked */
+  LCL_MakeLastParameterChangeHandlerFirst();
+
   LCL_ReadRawTime(&last_select_ts_raw);
   last_select_ts = last_select_ts_raw;
   last_select_ts_mono = 0.0;
   last_select_ts_mono_ns = 0;
+
+  system_timer_accurate = CLK_IsTimerAccurate(LCL_GetLocalClock());
+  system_timer_correction = 1.0;
 
   initialised = 1;
 }
@@ -152,7 +171,8 @@ SCH_Initialise(void)
 /* ================================================== */
 
 void
-SCH_Finalise(void) {
+SCH_Finalise(void)
+{
   unsigned int i;
 
   ARR_DestroyInstance(file_handlers);
@@ -170,9 +190,16 @@ SCH_Finalise(void) {
 
 /* ================================================== */
 
+int
+SCH_IsInitialised(void)
+{
+  return initialised;
+}
+
+/* ================================================== */
+
 void
-SCH_AddFileHandler
-(int fd, int events, SCH_FileHandler handler, SCH_ArbitraryArgument arg)
+SCH_AddFileHandler(int fd, int events, SCH_FileHandler handler, SCH_ArbitraryArgument arg)
 {
   FileHandlerEntry *ptr;
 
@@ -205,7 +232,6 @@ SCH_AddFileHandler
   if (one_highest_fd < fd + 1)
     one_highest_fd = fd + 1;
 }
-
 
 /* ================================================== */
 
@@ -471,7 +497,9 @@ SCH_RemoveTimeout(SCH_TimeoutID id)
 {
   TimerQueueEntry *ptr;
 
-  assert(initialised);
+  /* Ignore late attempts */
+  if (!initialised)
+    return;
 
   if (!id)
     return;
@@ -687,8 +715,6 @@ fill_fd_sets(fd_set **read_fds, fd_set **write_fds, fd_set **except_fds)
 
 /* ================================================== */
 
-#define JUMP_DETECT_THRESHOLD 10
-
 static int
 check_current_time(struct timespec *prev_raw, struct timespec *raw, int timeout,
                    struct timeval *orig_select_tv,
@@ -717,6 +743,32 @@ check_current_time(struct timespec *prev_raw, struct timespec *raw, int timeout,
     else
       UTI_DiffTimespecs(&elapsed_max, raw, prev_raw);
     UTI_ZeroTimespec(&elapsed_min);
+  }
+
+  /* Adjust the intervals if the system timeout is inaccurate with respect
+     to the local clock and update the correction */
+  if (!system_timer_accurate) {
+    double d_min = UTI_TimespecToDouble(&elapsed_min);
+    double d_max = UTI_TimespecToDouble(&elapsed_max);
+    static int premature_timeouts = 0;
+
+    UTI_DoubleToTimespec(d_min * MIN_SYSTEM_TIMEOUT_FREQ, &elapsed_min);
+    UTI_DoubleToTimespec(d_max * MAX_SYSTEM_TIMEOUT_FREQ, &elapsed_max);
+
+    if (timeout) {
+      if (d_max >= MIN_SYSTEM_TIMEOUT_CORRECTION_INTERVAL) {
+        system_timer_correction = UTI_DiffTimespecsToDouble(raw, prev_raw) / d_max;
+        system_timer_correction = CLAMP(MIN_SYSTEM_TIMEOUT_FREQ, system_timer_correction,
+                                        MAX_SYSTEM_TIMEOUT_FREQ);
+        DEBUG_LOG("timer correction %f elapsed=%f premature=%d",
+                  system_timer_correction, d_max, premature_timeouts);
+        premature_timeouts = 0;
+      }
+
+      if (d_max < MAX_INACCURATE_SYSTEM_TIMEOUT &&
+          UTI_CompareTimespecs(raw, &timer_queue.next->ts) < 0)
+        premature_timeouts++;
+    }
   }
 
   if (last_select_ts_raw.tv_sec + elapsed_min.tv_sec >
@@ -774,7 +826,7 @@ SCH_MainLoop(void)
   int status, errsv;
   struct timeval tv, saved_tv, *ptv;
   struct timespec ts, now, saved_now, cooked;
-  double err;
+  double err, timeout;
 
   assert(initialised);
 
@@ -789,8 +841,16 @@ SCH_MainLoop(void)
 
     /* Check whether there is a timeout and set it up */
     if (n_timer_queue_entries > 0) {
-      UTI_DiffTimespecs(&ts, &timer_queue.next->ts, &now);
-      assert(ts.tv_sec > 0 || ts.tv_nsec > 0);
+      if (system_timer_accurate) {
+        UTI_DiffTimespecs(&ts, &timer_queue.next->ts, &now);
+        assert(ts.tv_sec > 0 || ts.tv_nsec > 0);
+      } else {
+        timeout = UTI_DiffTimespecsToDouble(&timer_queue.next->ts, &now) /
+                  system_timer_correction;
+        timeout = MIN(timeout, MAX_INACCURATE_SYSTEM_TIMEOUT);
+        assert(timeout > 0.0);
+        UTI_DoubleToTimespec(timeout, &ts);
+      }
 
       UTI_TimespecToTimeval(&ts, &tv);
       ptv = &tv;

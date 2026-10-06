@@ -143,6 +143,7 @@ test_unit(void)
   for (i = 0; i < sizeof conf / sizeof conf[0]; i++)
     CNF_ParseLine(NULL, i + 1, conf[i]);
 
+  CLK_Initialise(0);
   LCL_Initialise();
 
   SCK_GetLoopbackIPAddress(AF_INET, &addr.ip_addr);
@@ -184,6 +185,7 @@ test_unit(void)
   NKC_DestroyInstance(inst);
 
   LCL_Finalise();
+  CLK_Finalise();
   CNF_Finalise();
 }
 #else

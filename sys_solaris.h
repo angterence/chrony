@@ -27,11 +27,12 @@
 #ifndef GOT_SYS_SOLARIS_H
 #define GOT_SYS_SOLARIS_H
 
+#include "clocks.h"
 #include "sys.h"
 
-void SYS_Solaris_Initialise(void);
+void SYS_Solaris_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock);
 
-void SYS_Solaris_Finalise(void);
+void SYS_Solaris_FinaliseClockDriver(struct clk_Driver *driver);
 
 void SYS_Solaris_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context);
 

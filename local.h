@@ -31,6 +31,10 @@
 
 #include "sysincl.h"
 
+#include "clocks.h"
+
+extern CLK_Instance LCL_GetLocalClock(void);
+
 /* Read the system clock */
 extern void LCL_ReadRawTime(struct timespec *ts);
 
@@ -91,6 +95,9 @@ extern void LCL_AddParameterChangeHandler(LCL_ParameterChangeHandler handler, vo
 /* Remove a handler */
 extern void LCL_RemoveParameterChangeHandler(LCL_ParameterChangeHandler, void *anything);
 
+/* Move the last handler in the list to the beginning */
+extern void LCL_MakeLastParameterChangeHandlerFirst(void);
+
 /* Check if a handler is invoked first when dispatching */
 extern int LCL_IsFirstParameterChangeHandler(LCL_ParameterChangeHandler handler);
 
@@ -113,13 +120,13 @@ typedef void (*LCL_DispersionNotifyHandler)(double dispersion, void *anything);
 
 /* Register a handler for being notified of dispersion being added to
    the local clock.  The handler MUST NOT unregister itself!!! */
-
 extern void LCL_AddDispersionNotifyHandler(LCL_DispersionNotifyHandler handler, void *anything);
 
 /* Delete a handler */
-
 extern void LCL_RemoveDispersionNotifyHandler(LCL_DispersionNotifyHandler handler, void *anything);
 
+/* Call the handlers */
+extern void LCL_InvokeDispersionNotifyHandlers(double dispersion);
 
 /* Read the absolute system frequency, relative to the uncompensated
    system.  Returned in units of parts per million.  Thus the result of

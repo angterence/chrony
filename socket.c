@@ -1571,8 +1571,11 @@ SCK_GetIntOption(int sock_fd, int level, int name, int *value)
 /* ================================================== */
 
 int
-SCK_EnableKernelRxTimestamping(int sock_fd)
+SCK_EnableKernelRxTimestamping(int sock_fd, clockid_t clock_id)
 {
+  if (clock_id != CLOCK_REALTIME)
+    return 0;
+
 #ifdef SO_TIMESTAMPNS
   if (SCK_SetIntOption(sock_fd, SOL_SOCKET, SO_TIMESTAMPNS, 1))
     return 1;

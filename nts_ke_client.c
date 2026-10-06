@@ -243,10 +243,7 @@ process_response(NKC_Instance inst)
         memcpy(inst->server_name, data, length);
         inst->server_name[length] = '\0';
 
-        /* Make sure the name is printable and has no spaces */
-        for (i = 0; i < length && isgraph((unsigned char)inst->server_name[i]); i++)
-          ;
-        if (i != length) {
+        if (!UTI_IsPrintableWord(inst->server_name, length + 1)) {
           DEBUG_LOG("Invalid server name");
           error = 1;
           break;

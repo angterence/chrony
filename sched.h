@@ -53,6 +53,8 @@ extern void SCH_Initialise(void);
 /* Finalisation function for the module */
 extern void SCH_Finalise(void);
 
+extern int SCH_IsInitialised(void);
+
 /* File events */
 #define SCH_FILE_INPUT 1
 #define SCH_FILE_OUTPUT 2

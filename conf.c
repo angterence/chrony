@@ -72,6 +72,7 @@ static void parse_clientloglimit(char *);
 static void parse_confdir(char *);
 static void parse_driftfile(char *);
 static void parse_fallbackdrift(char *);
+static void parse_clock(char *);
 static void parse_hwtimestamp(char *);
 static void parse_include(char *);
 static void parse_initstepslew(char *);
@@ -123,6 +124,7 @@ static double combine_limit = 3.0;
 
 static int cmd_port = DEFAULT_CANDM_PORT;
 
+static int do_log_clocks = 0;
 static int raw_measurements = 0;
 static int do_log_measurements = 0;
 static int do_log_selection = 0;
@@ -294,6 +296,9 @@ static int no_cert_time_check = 0;
 /* Flag disabling use of system trusted certificates */
 static int no_system_cert = 0;
 
+/* Array of CNF_Clock */
+static ARR_Instance clocks;
+
 /* Array of CNF_HwTsInterface */
 static ARR_Instance hwts_interfaces;
 
@@ -431,6 +436,8 @@ CNF_Initialise(int r, int client_only)
 
   restarted = r;
 
+  clocks = ARR_CreateInstance(sizeof (CNF_Clock));
+
   hwts_interfaces = ARR_CreateInstance(sizeof (CNF_HwTsInterface));
 
   init_sources = ARR_CreateInstance(sizeof (IPAddr));
@@ -479,6 +486,10 @@ void
 CNF_Finalise(void)
 {
   unsigned int i;
+
+  for (i = 0; i < ARR_GetSize(clocks); i++)
+    Free(((CNF_Clock *)ARR_GetElement(clocks, i))->name);
+  ARR_DestroyInstance(clocks);
 
   for (i = 0; i < ARR_GetSize(hwts_interfaces); i++)
     Free(((CNF_HwTsInterface *)ARR_GetElement(hwts_interfaces, i))->name);
@@ -626,6 +637,8 @@ CNF_ParseLine(const char *filename, int number, char *line)
     parse_broadcast(p);
   } else if (!strcasecmp(command, "clientloglimit")) {
     parse_clientloglimit(p);
+  } else if (!strcasecmp(command, "clock")) {
+    parse_clock(p);
   } else if (!strcasecmp(command, "clockprecision")) {
     parse_double(p, &clock_precision);
   } else if (!strcasecmp(command, "cmdallow")) {
@@ -970,11 +983,12 @@ parse_refclock(char *line)
 {
   int n, poll, dpoll, filter_length, pps_rate, min_samples_, max_samples_, sel_options;
   int local, max_lock_age, max_unreach, pps_forced, sel_option, stratum, tai, optional;
+  char *p, *cmd, *name, *param, *target_clock_name;
   uint32_t ref_id, lock_ref_id;
   double offset, delay, precision, max_dispersion, pulse_width;
-  char *p, *cmd, *name, *param;
   RefclockParameters *refclock;
 
+  target_clock_name = NULL;
   optional = 0;
   poll = 4;
   dpoll = 0;
@@ -1033,6 +1047,11 @@ parse_refclock(char *line)
         break;
     } else if (!strcasecmp(cmd, "filter")) {
       if (!SSCANF_IN_RANGE(line, "%d%n", &filter_length, &n, 0, INT_MAX))
+        break;
+    } else if (!strcasecmp(cmd, "clock")) {
+      target_clock_name = line;
+      n = CPS_SplitWord(line) - line;
+      if (n == 0)
         break;
     } else if (!strcasecmp(cmd, "local")) {
       n = 0;
@@ -1096,6 +1115,7 @@ parse_refclock(char *line)
   refclock = (RefclockParameters *)ARR_GetNewElement(refclock_sources);
   refclock->driver_name = name;
   refclock->driver_parameter = param;
+  refclock->target_clock_name = target_clock_name ? Strdup(target_clock_name) : NULL;
   refclock->driver_poll = dpoll;
   refclock->poll = poll;
   refclock->optional = optional;
@@ -1129,7 +1149,9 @@ parse_log(char *line)
     log_name = line;
     line = CPS_SplitWord(line);
     if (*log_name) {
-      if (!strcmp(log_name, "rawmeasurements")) {
+      if (!strcmp(log_name, "clocks")) {
+        do_log_clocks = 1;
+      } else if (!strcmp(log_name, "rawmeasurements")) {
         do_log_measurements = 1;
         raw_measurements = 1;
       } else if (!strcmp(log_name, "measurements")) {
@@ -1365,6 +1387,9 @@ parse_open_commands(char *line)
       add_open_command(REQ_AUTH_DATA);
     } else if (strcasecmp(s, "clients") == 0) {
       add_open_command(REQ_CLIENT_ACCESSES_BY_INDEX3);
+    } else if (strcasecmp(s, "clocks") == 0) {
+      add_open_command(REQ_N_CLOCKS);
+      add_open_command(REQ_CLOCK_DATA);
     } else if (strcasecmp(s, "manual") == 0) {
       add_open_command(REQ_MANUAL_LIST);
     } else if (strcasecmp(s, "ntpdata") == 0) {
@@ -1609,11 +1634,80 @@ parse_tempcomp(char *line)
 /* ================================================== */
 
 static void
+parse_clock(char *line)
+{
+  CNF_Clock *clock;
+  char *p;
+  int n;
+
+  if (!*line) {
+    command_parse_error();
+    return;
+  }
+
+  p = line;
+  line = CPS_SplitWord(line);
+
+  clock = ARR_GetNewElement(clocks);
+  clock->name = Strdup(p);
+  clock->main = 0;
+  clock->shadow = 0;
+  clock->free = 0;
+  clock->nocrossts = 0;
+  clock->minpoll = 0;
+  clock->maxpoll = 1;
+  clock->min_samples = 2;
+  clock->max_samples = 16;
+  clock->precision = 0.0;
+
+  for (p = line; *p; line += n, p = line) {
+    line = CPS_SplitWord(line);
+
+    if (!strcasecmp(p, "free")) {
+      n = 0;
+      clock->free = 1;
+    } else if (!strcasecmp(p, "main")) {
+      n = 0;
+      clock->main = 1;
+    } else if (!strcasecmp(p, "maxpoll")) {
+      if (!SSCANF_IN_RANGE(line, "%d%n", &clock->maxpoll, &n, -32, 32))
+        break;
+    } else if (!strcasecmp(p, "maxsamples")) {
+      if (!SSCANF_IN_RANGE(line, "%d%n", &clock->max_samples, &n, 0, INT_MAX))
+        break;
+    } else if (!strcasecmp(p, "minpoll")) {
+      if (!SSCANF_IN_RANGE(line, "%d%n", &clock->minpoll, &n, -32, 32))
+        break;
+    } else if (!strcasecmp(p, "minsamples")) {
+      if (!SSCANF_IN_RANGE(line, "%d%n", &clock->min_samples, &n, 0, INT_MAX))
+        break;
+    } else if (!strcasecmp(p, "nocrossts")) {
+      n = 0;
+      clock->nocrossts = 1;
+    } else if (!strcasecmp(p, "precision")) {
+      if (sscanf(line, "%lf%n", &clock->precision, &n) != 1)
+        break;
+    } else if (!strcasecmp(p, "shadow")) {
+      n = 0;
+      clock->shadow = 1;
+    } else {
+      break;
+    }
+  }
+
+  if (*p)
+    command_parse_error();
+}
+
+/* ================================================== */
+
+static void
 parse_hwtimestamp(char *line)
 {
   CNF_HwTsInterface *iface;
   int n, maxpoll_set = 0;
   char *p, filter[5];
+  double d;
 
   if (!*line) {
     command_parse_error();
@@ -1630,7 +1724,6 @@ parse_hwtimestamp(char *line)
   iface->max_samples = 16;
   iface->nocrossts = 0;
   iface->rxfilter = CNF_HWTS_RXFILTER_ANY;
-  iface->precision = 100.0e-9;
   iface->tx_comp = 0.0;
   iface->rx_comp = 0.0;
 
@@ -1651,7 +1744,8 @@ parse_hwtimestamp(char *line)
       if (!SSCANF_IN_RANGE(line, "%d%n", &iface->min_samples, &n, 0, INT_MAX))
         break;
     } else if (!strcasecmp(p, "precision")) {
-      if (sscanf(line, "%lf%n", &iface->precision, &n) != 1)
+      /* Ignored */
+      if (sscanf(line, "%lf%n", &d, &n) != 1)
         break;
     } else if (!strcasecmp(p, "rxcomp")) {
       if (sscanf(line, "%lf%n", &iface->rx_comp, &n) != 1)
@@ -2086,6 +2180,7 @@ CNF_AddRefclocks(void)
     RCL_AddRefclock(refclock);
     Free(refclock->driver_name);
     Free(refclock->driver_parameter);
+    Free(refclock->target_clock_name);
   }
 
   ARR_SetSize(refclock_sources, 0);
@@ -2162,6 +2257,14 @@ char *
 CNF_GetDumpDir(void)
 {
   return dumpdir;
+}
+
+/* ================================================== */
+
+int
+CNF_GetLogClocks(void)
+{
+  return do_log_clocks;
 }
 
 /* ================================================== */
@@ -2764,6 +2867,14 @@ double
 CNF_GetInitStepThreshold(void)
 {
   return init_slew_threshold;
+}
+
+/* ================================================== */
+
+ARR_Instance
+CNF_GetClocks(void)
+{
+  return clocks;
 }
 
 /* ================================================== */

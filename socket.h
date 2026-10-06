@@ -120,7 +120,7 @@ extern int SCK_SetIntOption(int sock_fd, int level, int name, int value);
 extern int SCK_GetIntOption(int sock_fd, int level, int name, int *value);
 
 /* Enable RX timestamping socket option */
-extern int SCK_EnableKernelRxTimestamping(int sock_fd);
+extern int SCK_EnableKernelRxTimestamping(int sock_fd, clockid_t clock_id);
 
 /* Operate on a stream socket - listen()/accept()/shutdown() wrappers */
 extern int SCK_ListenOnSocket(int sock_fd, int backlog);

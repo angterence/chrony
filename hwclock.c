@@ -29,8 +29,8 @@
 #include "sysincl.h"
 
 #include "array.h"
+#include "clocks.h"
 #include "hwclock.h"
-#include "local.h"
 #include "logging.h"
 #include "memory.h"
 #include "quantiles.h"
@@ -53,6 +53,9 @@
 #define DELAY_QUANT_MIN_STEP 1.0e-9
 
 struct HCL_Instance_Record {
+  CLK_Instance hw_clock;
+  CLK_Instance local_clock;
+
   /* HW and local reference timestamp */
   struct timespec hw_ref;
   struct timespec local_ref;
@@ -89,14 +92,14 @@ struct HCL_Instance_Record {
 
 /* ================================================== */
 
-static void
-handle_slew(struct timespec *raw, struct timespec *cooked, double dfreq,
-            double doffset, LCL_ChangeType change_type, void *anything)
+void
+HCL_SlewLocal(HCL_Instance clock, struct timespec *cooked, double dfreq, double doffset)
 {
-  HCL_Instance clock;
   double delta;
 
-  clock = anything;
+  DEBUG_LOG("dfreq=%e doffset=%e freq=%e offset=%e", dfreq, doffset,
+            clock->valid_coefs ? clock->frequency - 1.0 : 0.0,
+            clock->valid_coefs ? clock->offset : 0.0);
 
   if (clock->n_samples)
     UTI_AdjustTimespec(&clock->local_ref, cooked, &clock->local_ref, &delta, dfreq, doffset);
@@ -106,8 +109,27 @@ handle_slew(struct timespec *raw, struct timespec *cooked, double dfreq,
 
 /* ================================================== */
 
+void
+HCL_SlewHw(HCL_Instance clock, struct timespec *cooked, double dfreq, double doffset)
+{
+  double delta;
+
+  DEBUG_LOG("dfreq=%e doffset=%e freq=%e offset=%e", dfreq, doffset,
+            clock->valid_coefs ? clock->frequency - 1.0 : 0.0,
+            clock->valid_coefs ? clock->offset : 0.0);
+
+  //TODO: is this correct?
+  if (clock->n_samples)
+    UTI_AdjustTimespec(&clock->hw_ref, cooked, &clock->hw_ref, &delta, dfreq, doffset);
+  if (clock->valid_coefs)
+    clock->frequency *= 1.0 - dfreq;
+}
+
+/* ================================================== */
+
 HCL_Instance
-HCL_CreateInstance(int min_samples, int max_samples, double min_separation, double precision)
+HCL_CreateInstance(CLK_Instance hw_clock, CLK_Instance local_clock, int min_samples,
+                   int max_samples, double min_separation, double precision)
 {
   HCL_Instance clock;
 
@@ -116,6 +138,8 @@ HCL_CreateInstance(int min_samples, int max_samples, double min_separation, doub
   max_samples = MAX(min_samples, max_samples);
 
   clock = MallocNew(struct HCL_Instance_Record);
+  clock->hw_clock = hw_clock;
+  clock->local_clock = local_clock;
   clock->x_data = MallocArray(double, max_samples);
   clock->y_data = MallocArray(double, max_samples);
   clock->x_data[max_samples - 1] = 0.0;
@@ -131,8 +155,6 @@ HCL_CreateInstance(int min_samples, int max_samples, double min_separation, doub
                                            DELAY_QUANT_LARGE_STEP_DELAY,
                                            DELAY_QUANT_MIN_STEP);
 
-  LCL_AddParameterChangeHandler(handle_slew, clock);
-
   return clock;
 }
 
@@ -140,7 +162,6 @@ HCL_CreateInstance(int min_samples, int max_samples, double min_separation, doub
 
 void HCL_DestroyInstance(HCL_Instance clock)
 {
-  LCL_RemoveParameterChangeHandler(handle_slew, clock);
   QNT_DestroyInstance(clock->delay_quants);
   Free(clock->y_data);
   Free(clock->x_data);
@@ -168,15 +189,15 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
 {
   double delay, raw_delay, min_delay, low_delay, high_delay, e, pred_err;
   double delay_sum, hw_sum, local_sum, local_prec, freq;
-  int i, min_reading, combined;
+  int i, min_reading, under, over, combined;
   struct timespec ts1, ts2;
 
   if (n_readings < 1)
     return 0;
 
   /* Work out the current correction multiplier needed to get cooked delays */
-  LCL_CookTime(&tss[0][0], &ts1, NULL);
-  LCL_CookTime(&tss[n_readings - 1][2], &ts2, NULL);
+  CLK_CookTime(clock->local_clock, &tss[0][0], &ts1, NULL);
+  CLK_CookTime(clock->local_clock, &tss[n_readings - 1][2], &ts2, NULL);
   if (UTI_CompareTimespecs(&tss[0][0], &tss[n_readings - 1][2]) < 0)
     freq = UTI_DiffTimespecsToDouble(&ts1, &ts2) /
            UTI_DiffTimespecsToDouble(&tss[0][0], &tss[n_readings - 1][2]);
@@ -200,7 +221,7 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
     QNT_Accumulate(clock->delay_quants, delay);
   }
 
-  local_prec = LCL_GetSysPrecisionAsQuantum();
+  local_prec = CLK_GetPrecision(clock->local_clock);
 
   low_delay = QNT_GetQuantile(clock->delay_quants, QNT_GetMinK(clock->delay_quants)) -
               QNT_GetMinStep(clock->delay_quants) / 2.0;
@@ -208,14 +229,20 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
                QNT_GetMinStep(clock->delay_quants) / 2.0;
   low_delay = MIN(low_delay, high_delay);
   high_delay = MAX(high_delay, low_delay + local_prec);
+  over = under = 0;
 
   /* Combine readings with delay in the expected interval */
   for (i = combined = 0, delay_sum = hw_sum = local_sum = 0.0; i < n_readings; i++) {
     raw_delay = UTI_DiffTimespecsToDouble(&tss[i][2], &tss[i][0]);
     delay = freq * raw_delay;
 
-    if (delay < low_delay || delay > high_delay)
+    if (delay < low_delay) {
+      under++;
       continue;
+    } else if (delay > high_delay) {
+      over++;
+      continue;
+    }
 
     delay_sum += delay;
     hw_sum += UTI_DiffTimespecsToDouble(&tss[i][1], &tss[0][1]);
@@ -223,7 +250,8 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
     combined++;
   }
 
-  DEBUG_LOG("Combined %d readings lo=%e hi=%e", combined, low_delay, high_delay);
+  DEBUG_LOG("Combined %d readings over=%d under=%d lo=%e hi=%e",
+            combined, over, under, low_delay, high_delay);
 
   if (combined > 0) {
     UTI_AddDoubleToTimespec(&tss[0][1], hw_sum / combined, hw_ts);
@@ -242,7 +270,7 @@ HCL_ProcessReadings(HCL_Instance clock, int n_readings, struct timespec tss[][3]
   *err = MAX(min_delay / 2.0, clock->precision);
 
   pred_err = 0.0;
-  LCL_CookTime(local_ts, &ts1, NULL);
+  CLK_CookTime(clock->local_clock, local_ts, &ts1, NULL);
   if (!HCL_CookTime(clock, hw_ts, &ts2, &e) ||
       ((pred_err = UTI_DiffTimespecsToDouble(&ts1, &ts2)) > *err)) {
     *quality = 1;
@@ -261,17 +289,18 @@ void
 HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
                      struct timespec *local_ts, double err)
 {
-  double hw_delta, local_delta, local_freq, raw_freq;
+  double hw_delta, local_delta, hw_freq, local_freq, raw_freq;
   int i, n_runs, best_start;
 
-  local_freq = 1.0 - LCL_ReadAbsoluteFrequency() / 1.0e6;
+  hw_freq = 1.0 - CLK_GetFrequency(clock->hw_clock) / 1.0e6;
+  local_freq = 1.0 - CLK_GetFrequency(clock->local_clock) / 1.0e6;
 
   /* Shift old samples */
   if (clock->n_samples) {
     if (clock->n_samples >= clock->max_samples)
       clock->n_samples--;
 
-    hw_delta = UTI_DiffTimespecsToDouble(hw_ts, &clock->hw_ref);
+    hw_delta = UTI_DiffTimespecsToDouble(hw_ts, &clock->hw_ref) / hw_freq;
     local_delta = UTI_DiffTimespecsToDouble(local_ts, &clock->local_ref) / local_freq;
 
     if (hw_delta <= 0.0 || local_delta < clock->min_separation / 2.0) {
@@ -302,7 +331,7 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
     return;
   }
 
-  clock->frequency = raw_freq / local_freq;
+  clock->frequency = raw_freq / local_freq * hw_freq;
 
   /* Drop unneeded samples */
   if (clock->n_samples > clock->min_samples)
@@ -312,7 +341,7 @@ HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
      or the frequency is not sane, drop all samples and start again */
   if (fabs(clock->offset) > err ||
       fabs(clock->frequency - 1.0) > MAX_FREQ_OFFSET) {
-    DEBUG_LOG("HW clock reset");
+    DEBUG_LOG("HW clock reset offset=%e freq=%e", clock->offset, clock->frequency - 1.0);
     clock->n_samples = 0;
     clock->valid_coefs = 0;
   }
@@ -340,5 +369,40 @@ HCL_CookTime(HCL_Instance clock, struct timespec *raw, struct timespec *cooked, 
   if (err)
     *err = clock->last_err;
 
+  return 1;
+}
+
+/* ================================================== */
+
+int
+HCL_UncookTime(HCL_Instance clock, struct timespec *cooked, struct timespec *raw, double *err)
+{
+  double offset, elapsed;
+
+  if (!clock->valid_coefs)
+    return 0;
+
+  //raw = (cooked + clock->offset - local_ref) * clock->frequency + hw_ref;
+
+  elapsed = UTI_DiffTimespecsToDouble(cooked, &clock->local_ref);
+  offset = (elapsed + clock->offset) * clock->frequency;
+  UTI_AddDoubleToTimespec(&clock->hw_ref, offset, raw);
+
+  /* Fow now, just return the error of the last sample */
+  if (err)
+    *err = clock->last_err;
+
+  return 1;
+}
+
+/* ================================================== */
+
+int
+HCL_GetFrequency(HCL_Instance clock, double *freq)
+{
+  if (!clock->valid_coefs)
+    return 0;
+
+  *freq = 1.0e6 * (clock->frequency - 1.0);
   return 1;
 }

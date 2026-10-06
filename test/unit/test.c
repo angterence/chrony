@@ -21,7 +21,6 @@
 #include <config.h>
 #include <sysincl.h>
 #include <logging.h>
-#include <localp.h>
 #include <util.h>
 
 #include "test.h"
@@ -143,42 +142,4 @@ TST_SwapAddressBit(IPAddr *ip, unsigned int b)
   } else {
     assert(0);
   }
-}
-
-static double
-read_frequency(void)
-{
-  return 0.0;
-}
-
-static double
-set_frequency(double freq_ppm)
-{
-  return 0.0;
-}
-
-static void
-accrue_offset(double offset, double corr_rate)
-{
-}
-
-static int
-apply_step_offset(double offset)
-{
-  return 0;
-}
-
-static void
-offset_convert(struct timespec *raw, double *corr, double *err)
-{
-  *corr = 0.0;
-  if (err)
-    *err = 0.0;
-}
-
-void
-TST_RegisterDummyDrivers(void)
-{
-  lcl_RegisterSystemDrivers(read_frequency, set_frequency, accrue_offset,
-                            apply_step_offset, offset_convert, NULL, NULL);
 }

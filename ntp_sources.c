@@ -852,10 +852,8 @@ NSR_AddSourceByName(char *name, int family, int port, int pool, NTP_Source_Type 
   }
 
   /* Make sure the name is at least printable and has no spaces */
-  for (i = 0; name[i] != '\0'; i++) {
-    if (!isgraph((unsigned char)name[i]))
-      return NSR_InvalidName;
-  }
+  if (!UTI_IsPrintableWord(name, strlen(name) + 1))
+    return NSR_InvalidName;
 
   us = MallocNew(struct UnresolvedSource);
   us->name = Strdup(name);

@@ -28,12 +28,14 @@
 #ifndef GOT_REFCLOCK_H
 #define GOT_REFCLOCK_H
 
+#include "clocks.h"
 #include "srcparams.h"
 #include "sources.h"
 
 typedef struct {
   char *driver_name;
   char *driver_parameter;
+  char *target_clock_name;
   int driver_poll;
   int poll;
   int optional;
@@ -73,6 +75,7 @@ extern int RCL_ReportSource(uint32_t ref_id, RPT_SourceReport *report);
 extern int RCL_ModifyOffset(uint32_t ref_id, double offset);
 
 /* functions used by drivers */
+extern void RCL_SetTargetClock(RCL_Instance instance, CLK_Instance clock);
 extern void RCL_SetDriverData(RCL_Instance instance, void *data);
 extern void *RCL_GetDriverData(RCL_Instance instance);
 extern char *RCL_GetDriverParameter(RCL_Instance instance);

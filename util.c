@@ -1683,6 +1683,21 @@ UTI_SplitString(char *string, char **words, int max_saved_words)
 /* ================================================== */
 
 int
+UTI_IsPrintableWord(const char *buffer, unsigned int len)
+{
+  unsigned int i;
+
+  for (i = 0; i < len && buffer[i] != '\0'; i++) {
+    if (!isgraph((unsigned char)buffer[i]))
+      return 0;
+  }
+
+  return i > 0 && i < len;
+}
+
+/* ================================================== */
+
+int
 UTI_IsMemoryEqual(const void *s1, const void *s2, unsigned int len)
 {
 #if defined(HAVE_NETTLE_MEMEQL)

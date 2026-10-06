@@ -60,6 +60,7 @@ extern char *CNF_GetDriftFile(int *interval);
 extern char *CNF_GetLogDir(void);
 extern char *CNF_GetDumpDir(void);
 extern int CNF_GetLogBanner(void);
+extern int CNF_GetLogClocks(void);
 extern int CNF_GetLogMeasurements(int *raw);
 extern int CNF_GetLogSelection(void);
 extern int CNF_GetLogStatistics(void);
@@ -139,6 +140,21 @@ extern char *CNF_GetHwclockFile(void);
 extern int CNF_GetInitSources(void);
 extern double CNF_GetInitStepThreshold(void);
 
+typedef struct {
+  char *name;
+  int main;
+  int shadow;
+  int free;
+  int nocrossts;
+  int minpoll;
+  int maxpoll;
+  int min_samples;
+  int max_samples;
+  double precision;
+} CNF_Clock;
+
+extern ARR_Instance CNF_GetClocks(void);
+
 typedef enum {
   CNF_HWTS_RXFILTER_ANY,
   CNF_HWTS_RXFILTER_NONE,
@@ -155,7 +171,6 @@ typedef struct {
   int max_samples;
   int nocrossts;
   CNF_HwTs_RxFilter rxfilter;
-  double precision;
   double tx_comp;
   double rx_comp;
 } CNF_HwTsInterface;

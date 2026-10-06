@@ -138,6 +138,7 @@ test_unit(void)
   for (i = 0; i < sizeof conf / sizeof conf[0]; i++)
     CNF_ParseLine(NULL, i + 1, conf[i]);
 
+  CLK_Initialise(0);
   LCL_Initialise();
   KEY_Initialise();
   NSD_Initialise();
@@ -274,6 +275,7 @@ test_unit(void)
   NSD_Finalise();
   KEY_Finalise();
   LCL_Finalise();
+  CLK_Finalise();
   CNF_Finalise();
   HSH_Finalise();
 }

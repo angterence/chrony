@@ -28,13 +28,14 @@
 #ifndef GOT_SYS_OPENBSD_H
 #define GOT_SYS_OPENBSD_H
 
+#include "clocks.h"
 #include "sys.h"
 
-void SYS_OpenBSD_Initialise(void);
+void SYS_OpenBSD_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock);
 
-void SYS_OpenBSD_Finalise(void);
+void SYS_OpenBSD_FinaliseClockDriver(struct clk_Driver *driver);
 
-void SYS_OpenBSD_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context, int clock_control);
+void SYS_OpenBSD_DropRoot(uid_t uid, gid_t gid, SYS_ProcessContext context);
 
 void SYS_OpenBSD_EnableSystemCallFilter(int level, SYS_ProcessContext context);
 

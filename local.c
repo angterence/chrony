@@ -33,8 +33,8 @@
 #include "sysincl.h"
 
 #include "conf.h"
+#include "clocks.h"
 #include "local.h"
-#include "localp.h"
 #include "memory.h"
 #include "smooth.h"
 #include "util.h"
@@ -45,22 +45,13 @@
 /* Variable to store the current frequency, in ppm */
 static double current_freq_ppm;
 
-/* Maximum allowed frequency, in ppm */
-static double max_freq_ppm;
-
 /* Temperature compensation, in ppm */
 static double temp_comp_ppm;
 
 /* ================================================== */
-/* Store the system dependent drivers */
 
-static lcl_ReadFrequencyDriver drv_read_freq;
-static lcl_SetFrequencyDriver drv_set_freq;
-static lcl_AccrueOffsetDriver drv_accrue_offset;
-static lcl_ApplyStepOffsetDriver drv_apply_step_offset;
-static lcl_OffsetCorrectionDriver drv_offset_convert;
-static lcl_SetLeapDriver drv_set_leap;
-static lcl_SetSyncStatusDriver drv_set_sync_status;
+static CLK_Instance local_clock;
+static CLK_Instance shadow_clock;
 
 /* ================================================== */
 
@@ -97,200 +88,6 @@ static double precision_quantum;
 
 static double max_clock_error;
 
-#define NSEC_PER_SEC 1000000000
-
-/* ================================================== */
-
-/* Ask the system for the resolution of the system clock.  The Linux
-   clock_getres() is not usable, because it reports the internal timer
-   resolution, which is 1 ns when high-resolution timers are enabled,
-   even when using a lower-resolution clocksource. */
-
-static int
-get_clock_resolution(void)
-{
-#ifndef LINUX
-  struct timespec res;
-
-  if (clock_getres(CLOCK_REALTIME, &res) < 0)
-    return 0;
-
-  return NSEC_PER_SEC * res.tv_sec + res.tv_nsec;
-#else
-  return 0;
-#endif
-}
-
-/* ================================================== */
-
-#if defined(LINUX) && defined(CLOCK_MONOTONIC_RAW)
-
-static int
-compare_ints(const void *a, const void *b)
-{
-  return *(const int *)a - *(const int *)b;
-}
-
-#define READINGS 64
-
-/* On Linux, try to measure the actual resolution of the system
-   clock by performing a varying amount of busy work between clock
-   readings and finding the minimum change in the measured interval.
-   Require a change of at least two nanoseconds to ignore errors
-   caused by conversion to timespec.  Use the raw monotonic clock
-   to avoid the impact of potential frequency changes due to NTP
-   adjustments made by other processes, and the kernel dithering of
-   the 32-bit multiplier. */
-
-static int
-measure_clock_resolution(void)
-{
-  int i, j, b, busy, diffs[READINGS - 1], diff2, min;
-  struct timespec start_ts, ts[READINGS];
-  uint32_t acc;
-
-  if (clock_gettime(CLOCK_MONOTONIC_RAW, &start_ts) < 0)
-    return 0;
-
-  for (acc = 0, busy = 1; busy < 100000; busy = busy * 3 / 2 + 1) {
-    for (i = 0, b = busy * READINGS; i < READINGS; i++, b -= busy) {
-      if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts[i]) < 0)
-        return 0;
-
-      for (j = b; j > 0; j--)
-        acc += (acc & 1) + (uint32_t)ts[i].tv_nsec;
-    }
-
-    /* Give up after 0.1 seconds */
-    if (UTI_DiffTimespecsToDouble(&ts[READINGS - 1], &start_ts) > 0.1) {
-      DEBUG_LOG("Measurement too slow");
-      return 0;
-    }
-
-    for (i = 0; i < READINGS - 1; i++) {
-      diffs[i] = NSEC_PER_SEC * (ts[i + 1].tv_sec - ts[i].tv_sec) +
-                 (ts[i + 1].tv_nsec - ts[i].tv_nsec);
-
-      /* Make sure the differences are sane.  A resolution larger than the
-         reading time will be measured in measure_clock_read_delay(). */
-      if (diffs[i] <= 0 || diffs[i] > NSEC_PER_SEC)
-        return 0;
-    }
-
-    /* Sort the differences and keep values unique within 1 ns from the
-       first half of the array, which are less likely to be impacted by CPU
-       interruptions */
-    qsort(diffs, READINGS - 1, sizeof (diffs[0]), compare_ints);
-    for (i = 1, j = 0; i < READINGS / 2; i++) {
-      if (diffs[j] + 1 < diffs[i])
-        diffs[++j] = diffs[i];
-    }
-    j++;
-
-#if 0
-    for (i = 0; i < j; i++)
-      DEBUG_LOG("busy %d diff %d %d", busy, i, diffs[i]);
-#endif
-
-    /* Require at least three unique differences to be more confident
-       with the result */
-    if (j < 3)
-      continue;
-
-    /* Find the smallest difference between the unique differences */
-    for (i = 1, min = 0; i < j; i++) {
-      diff2 = diffs[i] - diffs[i - 1];
-      if (min == 0 || min > diff2)
-        min = diff2;
-    }
-
-    if (min == 0)
-      continue;
-
-    /* Prevent the compiler from optimising the busy work out */
-    if (acc == 0)
-      min += 1;
-
-    return min;
-  }
-
-  return 0;
-}
-
-#else
-static int
-measure_clock_resolution(void)
-{
-  return 0;
-}
-#endif
-
-/* ================================================== */
-
-/* As a fallback, measure how long it takes to read the clock.  It
-   typically takes longer than the resolution of the clock (and it
-   depends on the CPU speed), i.e. every reading gives a different
-   value, but handle also low-resolution clocks that might give
-   the same reading multiple times. */
-
-/* Define the number of increments of the system clock that we want
-   to see to be fairly sure that we've got something approaching
-   the minimum increment.  Even on a crummy implementation that can't
-   interpolate between 10ms ticks, we should get this done in
-   under 1s of busy waiting. */
-#define NITERS 100
-
-static int
-measure_clock_read_delay(void)
-{
-  struct timespec ts, old_ts;
-  int iters, diff, best;
-
-  LCL_ReadRawTime(&old_ts);
-
-  /* Assume we must be better than a second */
-  best = NSEC_PER_SEC;
-  iters = 0;
-
-  do {
-    LCL_ReadRawTime(&ts);
-
-    diff = NSEC_PER_SEC * (ts.tv_sec - old_ts.tv_sec) + (ts.tv_nsec - old_ts.tv_nsec);
-
-    old_ts = ts;
-    if (diff > 0) {
-      if (diff < best)
-        best = diff;
-      iters++;
-    }
-  } while (iters < NITERS);
-
-  assert(best > 0);
-
-  return best;
-}
-
-/* ================================================== */
-
-static double
-measure_clock_precision(void)
-{
-  int res, delay, prec;
-
-  res = get_clock_resolution();
-  if (res <= 0)
-    res = measure_clock_resolution();
-
-  delay = measure_clock_read_delay();
-
-  if (res > 0)
-    prec = MIN(res, delay);
-  else
-    prec = delay;
-
-  return prec / 1.0e9;
-}
-
 /* ================================================== */
 
 void
@@ -300,33 +97,21 @@ LCL_Initialise(void)
 
   dispersion_notify_list.next = dispersion_notify_list.prev = &dispersion_notify_list;
 
-  /* Null out the system drivers, so that we die
-     if they never get defined before use */
-  
-  drv_read_freq = NULL;
-  drv_set_freq = NULL;
-  drv_accrue_offset = NULL;
-  drv_offset_convert = NULL;
-
   /* This ought to be set from the system driver layer */
   current_freq_ppm = 0.0;
   temp_comp_ppm = 0.0;
 
-  precision_quantum = CNF_GetClockPrecision();
-  if (precision_quantum <= 0.0)
-    precision_quantum = measure_clock_precision();
+  local_clock = CLK_GetMainClock();
+  shadow_clock = CLK_GetShadowClock();
 
-  precision_quantum = CLAMP(1.0e-9, precision_quantum, 1.0);
+  current_freq_ppm = CLK_GetFrequency(local_clock);
+
+  DEBUG_LOG("Local freq=%.3fppm", current_freq_ppm);
+
+  precision_quantum = CLK_GetPrecision(local_clock);
   precision_log = round(log(precision_quantum) / log(2.0));
   /* NTP code doesn't support smaller log than -30 */
   assert(precision_log >= -30);
-
-  DEBUG_LOG("Clock precision %.9f (%d)", precision_quantum, precision_log);
-
-  /* This is the maximum allowed frequency offset in ppm, the time must
-     never stop or run backwards */
-  max_freq_ppm = CNF_GetMaxDrift();
-  max_freq_ppm = CLAMP(0.0, max_freq_ppm, 100000.0);
 
   max_clock_error = CNF_GetMaxClockError() * 1e-6;
 }
@@ -339,6 +124,8 @@ LCL_Finalise(void)
   /* Make sure all handlers have been removed */
   BRIEF_ASSERT(change_list.next == &change_list);
   BRIEF_ASSERT(dispersion_notify_list.next == &dispersion_notify_list);
+
+  local_clock = NULL;
 }
 
 /* ================================================== */
@@ -429,6 +216,27 @@ LCL_IsFirstParameterChangeHandler(LCL_ParameterChangeHandler handler)
 
 /* ================================================== */
 
+void
+LCL_MakeLastParameterChangeHandlerFirst(void)
+{
+  ChangeListEntry *ptr;
+
+  BRIEF_ASSERT(change_list.next != &change_list);
+
+  /* Remove the last handler from the list */
+  ptr = change_list.prev;
+  ptr->next->prev = ptr->prev;
+  ptr->prev->next = ptr->next;
+
+  /* And add it back to the beginning */
+  ptr->prev = &change_list;
+  ptr->next = change_list.next;
+  change_list.next->prev = ptr;
+  change_list.next = ptr;
+}
+
+/* ================================================== */
+
 static void
 invoke_parameter_change_handlers(struct timespec *raw, struct timespec *cooked,
                                  double dfreq, double doffset,
@@ -496,11 +304,25 @@ void LCL_RemoveDispersionNotifyHandler(LCL_DispersionNotifyHandler handler, void
 
 /* ================================================== */
 
+CLK_Instance
+LCL_GetLocalClock(void)
+{
+  return local_clock;
+}
+
+/* ================================================== */
+
 void
 LCL_ReadRawTime(struct timespec *ts)
 {
-  if (clock_gettime(CLOCK_REALTIME, ts) < 0)
-    LOG_FATAL("clock_gettime() failed : %s", strerror(errno));
+  struct timespec fast_ts;
+
+  CLK_ReadTime(shadow_clock, &fast_ts);
+
+  if (!CLK_ConvertTime(shadow_clock, 0, &fast_ts, local_clock, 0, ts, NULL)) {
+    DEBUG_LOG("Falling back to direct read of %s", CLK_GetName(local_clock));
+    CLK_ReadTime(local_clock, ts);
+  }
 }
 
 /* ================================================== */
@@ -519,10 +341,7 @@ LCL_ReadCookedTime(struct timespec *result, double *err)
 void
 LCL_CookTime(struct timespec *raw, struct timespec *cooked, double *err)
 {
-  double correction;
-
-  LCL_GetOffsetCorrection(raw, &correction, err);
-  UTI_AddDoubleToTimespec(raw, correction, cooked);
+  CLK_CookTime(local_clock, raw, cooked, err);
 }
 
 /* ================================================== */
@@ -531,7 +350,7 @@ void
 LCL_GetOffsetCorrection(struct timespec *raw, double *correction, double *err)
 {
   /* Call system specific driver to get correction */
-  (*drv_offset_convert)(raw, correction, err);
+  *correction = CLK_GetOffset(local_clock, 0, raw, err);
 }
 
 /* ================================================== */
@@ -550,19 +369,6 @@ LCL_ReadAbsoluteFrequency(void)
   }
 
   return freq;
-}
-
-/* ================================================== */
-
-static double
-clamp_freq(double freq)
-{
-  if (freq <= max_freq_ppm && freq >= -max_freq_ppm)
-    return freq;
-
-  LOG(LOGS_WARN, "Frequency %.1f ppm exceeds allowed maximum", freq);
-
-  return CLAMP(-max_freq_ppm, freq, max_freq_ppm);
 }
 
 /* ================================================== */
@@ -589,8 +395,6 @@ LCL_SetAbsoluteFrequency(double afreq_ppm)
   struct timespec raw, cooked;
   double dfreq;
   
-  afreq_ppm = clamp_freq(afreq_ppm);
-
   /* Apply temperature compensation */
   if (temp_comp_ppm != 0.0) {
     afreq_ppm = afreq_ppm * (1.0 - 1.0e-6 * temp_comp_ppm) - temp_comp_ppm;
@@ -598,9 +402,7 @@ LCL_SetAbsoluteFrequency(double afreq_ppm)
 
   /* Call the system-specific driver for setting the frequency */
   
-  afreq_ppm = (*drv_set_freq)(afreq_ppm);
-
-  dfreq = (afreq_ppm - current_freq_ppm) / (1.0e6 - current_freq_ppm);
+  dfreq = CLK_SetFrequency(local_clock, afreq_ppm);
 
   LCL_ReadRawTime(&raw);
   LCL_CookTime(&raw, &cooked, NULL);
@@ -608,8 +410,7 @@ LCL_SetAbsoluteFrequency(double afreq_ppm)
   /* Dispatch to all handlers */
   invoke_parameter_change_handlers(&raw, &cooked, dfreq, 0.0, LCL_ChangeAdjust);
 
-  current_freq_ppm = afreq_ppm;
-
+  current_freq_ppm = CLK_GetFrequency(local_clock);
 }
 
 /* ================================================== */
@@ -617,28 +418,7 @@ LCL_SetAbsoluteFrequency(double afreq_ppm)
 void
 LCL_AccumulateDeltaFrequency(double dfreq)
 {
-  struct timespec raw, cooked;
-  double old_freq_ppm;
-
-  old_freq_ppm = current_freq_ppm;
-
-  /* Work out new absolute frequency.  Note that absolute frequencies
-   are handled in units of ppm, whereas the 'dfreq' argument is in
-   terms of the gradient of the (offset) v (local time) function. */
-
-  current_freq_ppm += dfreq * (1.0e6 - current_freq_ppm);
-
-  current_freq_ppm = clamp_freq(current_freq_ppm);
-
-  /* Call the system-specific driver for setting the frequency */
-  current_freq_ppm = (*drv_set_freq)(current_freq_ppm);
-  dfreq = (current_freq_ppm - old_freq_ppm) / (1.0e6 - old_freq_ppm);
-
-  LCL_ReadRawTime(&raw);
-  LCL_CookTime(&raw, &cooked, NULL);
-
-  /* Dispatch to all handlers */
-  invoke_parameter_change_handlers(&raw, &cooked, dfreq, 0.0, LCL_ChangeAdjust);
+  LCL_AccumulateFrequencyAndOffset(dfreq, 0.0, 0.0);
 }
 
 /* ================================================== */
@@ -646,23 +426,7 @@ LCL_AccumulateDeltaFrequency(double dfreq)
 int
 LCL_AccumulateOffset(double offset, double corr_rate)
 {
-  struct timespec raw, cooked;
-
-  /* In this case, the cooked time to be passed to the notify clients
-     has to be the cooked time BEFORE the change was made */
-
-  LCL_ReadRawTime(&raw);
-  LCL_CookTime(&raw, &cooked, NULL);
-
-  if (!check_offset(&cooked, offset))
-    return 0;
-
-  (*drv_accrue_offset)(offset, corr_rate);
-
-  /* Dispatch to all handlers */
-  invoke_parameter_change_handlers(&raw, &cooked, 0.0, offset, LCL_ChangeAdjust);
-
-  return 1;
+  return LCL_AccumulateFrequencyAndOffset(0.0, offset, corr_rate);
 }
 
 /* ================================================== */
@@ -681,7 +445,7 @@ LCL_ApplyStepOffset(double offset)
   if (!check_offset(&raw, offset))
       return 0;
 
-  if (!(*drv_apply_step_offset)(offset)) {
+  if (!CLK_ApplyStepOffset(local_clock, offset)) {
     LOG(LOGS_ERR, "Could not step system clock");
     return 0;
   }
@@ -706,7 +470,7 @@ LCL_NotifyExternalTimeStep(struct timespec *raw, struct timespec *cooked,
   /* Dispatch to all handlers */
   invoke_parameter_change_handlers(raw, cooked, 0.0, offset, LCL_ChangeUnknownStep);
 
-  lcl_InvokeDispersionNotifyHandlers(dispersion);
+  LCL_InvokeDispersionNotifyHandlers(dispersion);
 }
 
 /* ================================================== */
@@ -732,7 +496,6 @@ int
 LCL_AccumulateFrequencyAndOffset(double dfreq, double doffset, double corr_rate)
 {
   struct timespec raw, cooked;
-  double old_freq_ppm;
 
   LCL_ReadRawTime(&raw);
   /* Due to modifying the offset, this has to be the cooked time prior
@@ -742,23 +505,9 @@ LCL_AccumulateFrequencyAndOffset(double dfreq, double doffset, double corr_rate)
   if (!check_offset(&cooked, doffset))
     return 0;
 
-  old_freq_ppm = current_freq_ppm;
-
-  /* Work out new absolute frequency.  Note that absolute frequencies
-   are handled in units of ppm, whereas the 'dfreq' argument is in
-   terms of the gradient of the (offset) v (local time) function. */
-  current_freq_ppm += dfreq * (1.0e6 - current_freq_ppm);
-
-  current_freq_ppm = clamp_freq(current_freq_ppm);
-
-  DEBUG_LOG("old_freq=%.3fppm new_freq=%.3fppm offset=%.6fsec",
-      old_freq_ppm, current_freq_ppm, doffset);
-
   /* Call the system-specific driver for setting the frequency */
-  current_freq_ppm = (*drv_set_freq)(current_freq_ppm);
-  dfreq = (current_freq_ppm - old_freq_ppm) / (1.0e6 - old_freq_ppm);
-
-  (*drv_accrue_offset)(doffset, corr_rate);
+  dfreq = CLK_AccumulateFrequencyAndOffset(local_clock, dfreq, doffset, corr_rate);
+  current_freq_ppm = CLK_GetFrequency(local_clock);
 
   /* Dispatch to all handlers */
   invoke_parameter_change_handlers(&raw, &cooked, dfreq, doffset, LCL_ChangeAdjust);
@@ -777,7 +526,9 @@ LCL_AccumulateFrequencyAndOffsetNoHandlers(double dfreq, double doffset, double 
   first_handler = change_list.next;
   change_list.next = &change_list;
 
+  CLK_Unlock(local_clock);
   r = LCL_AccumulateFrequencyAndOffset(dfreq, doffset, corr_rate);
+  CLK_Lock(local_clock);
 
   change_list.next = first_handler;
 
@@ -787,7 +538,7 @@ LCL_AccumulateFrequencyAndOffsetNoHandlers(double dfreq, double doffset, double 
 /* ================================================== */
 
 void
-lcl_InvokeDispersionNotifyHandlers(double dispersion)
+LCL_InvokeDispersionNotifyHandlers(double dispersion)
 {
   DispersionNotifyListEntry *ptr;
 
@@ -795,30 +546,6 @@ lcl_InvokeDispersionNotifyHandlers(double dispersion)
     (ptr->handler)(dispersion, ptr->anything);
   }
 
-}
-
-/* ================================================== */
-
-void
-lcl_RegisterSystemDrivers(lcl_ReadFrequencyDriver read_freq,
-                          lcl_SetFrequencyDriver set_freq,
-                          lcl_AccrueOffsetDriver accrue_offset,
-                          lcl_ApplyStepOffsetDriver apply_step_offset,
-                          lcl_OffsetCorrectionDriver offset_convert,
-                          lcl_SetLeapDriver set_leap,
-                          lcl_SetSyncStatusDriver set_sync_status)
-{
-  drv_read_freq = read_freq;
-  drv_set_freq = set_freq;
-  drv_accrue_offset = accrue_offset;
-  drv_apply_step_offset = apply_step_offset;
-  drv_offset_convert = offset_convert;
-  drv_set_leap = set_leap;
-  drv_set_sync_status = set_sync_status;
-
-  current_freq_ppm = (*drv_read_freq)();
-
-  DEBUG_LOG("Local freq=%.3fppm", current_freq_ppm);
 }
 
 /* ================================================== */
@@ -868,7 +595,7 @@ LCL_CancelOffsetCorrection(void)
 int
 LCL_CanSystemLeap(void)
 {
-  return drv_set_leap ? 1 : 0;
+  return CLK_CanLeap(local_clock);
 }
 
 /* ================================================== */
@@ -876,9 +603,7 @@ LCL_CanSystemLeap(void)
 void
 LCL_SetSystemLeap(int leap, int tai_offset)
 {
-  if (drv_set_leap) {
-    (drv_set_leap)(leap, tai_offset);
-  }
+  CLK_SetLeap(local_clock, leap, tai_offset);
 }
 
 /* ================================================== */
@@ -901,7 +626,8 @@ LCL_SetTempComp(double comp)
   current_freq_ppm = current_freq_ppm * (1.0 - 1.0e-6 * comp) - comp;
 
   /* Call the system-specific driver for setting the frequency */
-  current_freq_ppm = (*drv_set_freq)(current_freq_ppm);
+  CLK_SetFrequency(local_clock, current_freq_ppm);
+  current_freq_ppm = CLK_GetFrequency(local_clock);
 
   temp_comp_ppm = (uncomp_freq_ppm - current_freq_ppm) /
     (1.0e-6 * uncomp_freq_ppm + 1.0);
@@ -914,9 +640,7 @@ LCL_SetTempComp(double comp)
 void
 LCL_SetSyncStatus(int synchronised, double est_error, double max_error)
 {
-  if (drv_set_sync_status) {
-    (drv_set_sync_status)(synchronised, est_error, max_error);
-  }
+  CLK_SetSyncStatus(local_clock, synchronised, est_error, max_error);
 }
 
 /* ================================================== */

@@ -51,6 +51,7 @@
 #include "rtc.h"
 #include "pktlength.h"
 #include "clientlog.h"
+#include "clocks.h"
 #include "refclock.h"
 
 /* ================================================== */
@@ -1369,6 +1370,47 @@ handle_modify_offset(CMD_Request *rx_message, CMD_Reply *tx_message)
 
 /* ================================================== */
 
+static void
+handle_n_clocks(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  tx_message->reply = htons(RPY_N_CLOCKS);
+  tx_message->data.n_clocks.n_clocks = htonl(CLK_GetNumberOfClocks());
+}
+
+/* ================================================== */
+
+static void
+handle_clock_data(CMD_Request *rx_message, CMD_Reply *tx_message)
+{
+  RPT_ClockReport report;
+
+  if (!CLK_GetReport(ntohl(rx_message->data.clock_data.index), &report)) {
+    tx_message->status = htons(STT_NOSUCHCLOCK);
+    return;
+  }
+
+  tx_message->reply = htons(RPY_CLOCK_DATA);
+
+  /* Avoid compiler warning */
+  if (strlen(report.name) >= sizeof (tx_message->data.clock_data.name))
+    memcpy(tx_message->data.clock_data.name, report.name,
+           sizeof (tx_message->data.clock_data.name));
+  else
+    strncpy((char *)tx_message->data.clock_data.name, report.name,
+            sizeof (tx_message->data.clock_data.name));
+
+  tx_message->data.clock_data.cook_offset = UTI_Integer64HostToNetwork(report.cook_offset);
+  tx_message->data.clock_data.precision = UTI_FloatHostToNetwork(report.precision);
+  tx_message->data.clock_data.raw_offset = UTI_FloatHostToNetwork(report.raw_offset);
+  tx_message->data.clock_data.last_time_adj =
+    UTI_FloatHostToNetwork(report.last_time_adj);
+  tx_message->data.clock_data.freq_ppm = UTI_FloatHostToNetwork(report.freq_ppm);
+  tx_message->data.clock_data.last_freq_adj_ppm =
+    UTI_FloatHostToNetwork(report.last_freq_adj_ppm);
+}
+
+/* ================================================== */
+
 static int
 handle_readwrite_commands(int command, CMD_Request *request, CMD_Reply *reply)
 {
@@ -1549,6 +1591,9 @@ handle_readonly_commands(int command, int full_access, CMD_Request *request, CMD
     case REQ_CLIENT_ACCESSES_BY_INDEX3:
       handle_client_accesses_by_index(request, reply);
       break;
+    case REQ_CLOCK_DATA:
+      handle_clock_data(request, reply);
+      break;
     case REQ_CMDACCHECK:
       handle_cmdaccheck(request, reply);
       break;
@@ -1560,6 +1605,9 @@ handle_readonly_commands(int command, int full_access, CMD_Request *request, CMD
       break;
     case REQ_NTP_SOURCE_NAME:
       handle_ntp_source_name(request, reply);
+      break;
+    case REQ_N_CLOCKS:
+      handle_n_clocks(request, reply);
       break;
     case REQ_N_SOURCES:
       handle_n_sources(request, reply);

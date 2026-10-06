@@ -22,18 +22,22 @@
 
   =======================================================================
 
-  Driver for systems that implement the adjtimex()/ntp_adjtime() system call
+  Driver for systems that implement the adjtimex()/ntp_adjtime() or
+  clock_adjtime() system call
   */
 
 #include "config.h"
 
 #include "sysincl.h"
 
+#include "clocks_priv.h"
 #include "conf.h"
 #include "privops.h"
 #include "sys_generic.h"
 #include "sys_timex.h"
 #include "logging.h"
+#include "memory.h"
+#include "util.h"
 
 #ifdef PRIVOPS_ADJUSTTIMEX
 #define NTP_ADJTIME PRV_AdjustTimex
@@ -60,11 +64,19 @@
 /* Minimum assumed rate at which the kernel updates the clock frequency */
 #define MIN_TICK_RATE 100
 
-/* Saved timex status */
-static int sys_status;
+struct timex_context {
+  CLK_Instance clock;
 
-/* Saved TAI-UTC offset */
-static int sys_tai_offset;
+  /* Saved timex status */
+  int status;
+
+  /* Saved TAI-UTC offset */
+  int tai_offset;
+
+  long last_constant;
+  long last_freq;
+  int last_status;
+};
 
 /* ================================================== */
 
@@ -81,13 +93,13 @@ convert_timex_frequency(const struct timex *txc)
 /* ================================================== */
 
 static double
-read_frequency(void)
+read_frequency(clk_DriverContext *context)
 {
   struct timex txc;
 
   txc.modes = 0;
 
-  SYS_Timex_Adjust(&txc, 0);
+  SYS_Timex_Adjust(context, &txc, 0);
 
   return convert_timex_frequency(&txc);
 }
@@ -95,14 +107,14 @@ read_frequency(void)
 /* ================================================== */
 
 static double
-set_frequency(double freq_ppm)
+set_frequency(clk_DriverContext *context, double freq_ppm)
 {
   struct timex txc;
 
   txc.modes = MOD_FREQUENCY;
   txc.freq = freq_ppm * -FREQ_SCALE;
 
-  SYS_Timex_Adjust(&txc, 0);
+  SYS_Timex_Adjust(context, &txc, 0);
 
   return convert_timex_frequency(&txc);
 }
@@ -110,43 +122,47 @@ set_frequency(double freq_ppm)
 /* ================================================== */
 
 static void
-set_leap(int leap, int tai_offset)
+set_leap(clk_DriverContext *context, int leap, int tai_offset)
 {
+  struct timex_context *tc = context;
   struct timex txc;
   int applied, prev_status;
 
-  txc.modes = 0;
-  applied = SYS_Timex_Adjust(&txc, 0) == TIME_WAIT;
+  if (CLK_GetId(tc->clock) != CLOCK_REALTIME)
+    return;
 
-  prev_status = sys_status;
-  sys_status &= ~(STA_INS | STA_DEL);
+  txc.modes = 0;
+  applied = SYS_Timex_Adjust(context, &txc, 0) == TIME_WAIT;
+
+  prev_status = tc->status;
+  tc->status &= ~(STA_INS | STA_DEL);
 
   if (leap > 0)
-    sys_status |= STA_INS;
+    tc->status |= STA_INS;
   else if (leap < 0)
-    sys_status |= STA_DEL;
+    tc->status |= STA_DEL;
 
   txc.modes = MOD_STATUS;
-  txc.status = sys_status;
+  txc.status = tc->status;
 
 #ifdef MOD_TAI
   if (tai_offset) {
     txc.modes |= MOD_TAI;
     txc.constant = tai_offset;
 
-    if (applied && !(sys_status & (STA_INS | STA_DEL)))
-      sys_tai_offset += prev_status & STA_INS ? 1 : -1;
+    if (applied && !(tc->status & (STA_INS | STA_DEL)))
+      tc->tai_offset += prev_status & STA_INS ? 1 : -1;
 
-    if (sys_tai_offset != tai_offset) {
-      sys_tai_offset = tai_offset;
+    if (tc->tai_offset != tai_offset) {
+      tc->tai_offset = tai_offset;
       LOG(LOGS_INFO, "System clock TAI offset set to %d seconds", tai_offset);
     }
   }
 #endif
 
-  SYS_Timex_Adjust(&txc, 0);
+  SYS_Timex_Adjust(context, &txc, 0);
 
-  if (prev_status != sys_status) {
+  if (prev_status != tc->status) {
     LOG(LOGS_INFO, "System clock status %s leap second",
         leap ? (leap > 0 ? "set to insert" : "set to delete") :
         (applied ? "reset after" : "set to not insert/delete"));
@@ -156,9 +172,14 @@ set_leap(int leap, int tai_offset)
 /* ================================================== */
 
 static void
-set_sync_status(int synchronised, double est_error, double max_error)
+set_sync_status(clk_DriverContext *context, int synchronised, double est_error,
+                double max_error)
 {
+  struct timex_context *tc = context;
   struct timex txc;
+
+  if (!CLK_IsSystem(tc->clock))
+    return;
 
   if (synchronised) {
     if (est_error > MAX_SYNC_ERROR)
@@ -178,87 +199,98 @@ set_sync_status(int synchronised, double est_error, double max_error)
 #endif
 
   if (synchronised)
-    sys_status &= ~STA_UNSYNC;
+    tc->status &= ~STA_UNSYNC;
   else
-    sys_status |= STA_UNSYNC;
+    tc->status |= STA_UNSYNC;
 
   txc.modes = MOD_STATUS | MOD_ESTERROR | MOD_MAXERROR;
-  txc.status = sys_status;
+  txc.status = tc->status;
   txc.esterror = est_error * 1.0e6;
   txc.maxerror = max_error * 1.0e6;
 
-  if (SYS_Timex_Adjust(&txc, 1) < 0)
+  if (SYS_Timex_Adjust(context, &txc, 1) < 0)
     ;
 }
 
 /* ================================================== */
 
 static void
-initialise_timex(void)
+initialise_timex(struct timex_context *tc, CLK_Instance clock)
 {
   struct timex txc;
 
-  sys_status = STA_UNSYNC;
-  sys_tai_offset = 0;
+  tc->clock = clock;
+
+  tc->status = STA_UNSYNC;
+  tc->tai_offset = 0;
+  tc->last_status = -1;
+
+  if (!CLK_IsSystem(tc->clock))
+    return;
 
   /* Reset PLL offset */
   txc.modes = MOD_OFFSET | MOD_STATUS;
-  txc.status = STA_PLL | sys_status;
+  txc.status = STA_PLL | tc->status;
   txc.offset = 0;
-  SYS_Timex_Adjust(&txc, 0);
+  SYS_Timex_Adjust(tc, &txc, 0);
 
   /* Turn PLL off */
   txc.modes = MOD_STATUS;
-  txc.status = sys_status;
-  SYS_Timex_Adjust(&txc, 0);
+  txc.status = tc->status;
+  SYS_Timex_Adjust(tc, &txc, 0);
+
+#ifdef LINUX
+  /* Reset adjtime() offset */
+  txc.modes = ADJ_OFFSET_SINGLESHOT;
+  txc.offset = 0;
+  SYS_Timex_Adjust(tc, &txc, 0);
+#endif
 }
 
 /* ================================================== */
 
 void
-SYS_Timex_Initialise(void)
+SYS_Timex_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock,
+                                double max_set_freq_ppm, double max_set_freq_delay,
+                                double min_fastslew_offset, double max_fastslew_rate)
 {
-  SYS_Timex_InitialiseWithFunctions(MAX_FREQ, 1.0 / MIN_TICK_RATE, NULL, NULL, NULL,
-                                    0.0, 0.0, NULL, NULL);
+  struct timex_context *tc;
+
+  tc = MallocNew(struct timex_context);
+
+  initialise_timex(tc, clock);
+
+  /* The lower drivers must not have their own context.  They will get the
+     context of this driver to be able to call SYS_Timex_Adjust(), or they
+     have to be stateless. */
+  BRIEF_ASSERT(!driver->context);
+  driver->context = tc;
+
+  if (!driver->read_frequency)
+    driver->read_frequency = read_frequency;
+  if (!driver->set_frequency)
+    driver->set_frequency = set_frequency;
+  driver->set_leap = set_leap;
+  driver->set_sync_status = set_sync_status;
+
+  SYS_Generic_InitialiseClockDriver(driver, clock, max_set_freq_ppm, max_set_freq_delay,
+                                    min_fastslew_offset, max_fastslew_rate);
 }
 
 /* ================================================== */
 
 void
-SYS_Timex_InitialiseWithFunctions(double max_set_freq_ppm, double max_set_freq_delay,
-                                  lcl_ReadFrequencyDriver sys_read_freq,
-                                  lcl_SetFrequencyDriver sys_set_freq,
-                                  lcl_ApplyStepOffsetDriver sys_apply_step_offset,
-                                  double min_fastslew_offset, double max_fastslew_rate,
-                                  lcl_AccrueOffsetDriver sys_accrue_offset,
-                                  lcl_OffsetCorrectionDriver sys_get_offset_correction)
+SYS_Timex_FinaliseClockDriver(struct clk_Driver *driver)
 {
-  initialise_timex();
-
-  SYS_Generic_CompleteFreqDriver(max_set_freq_ppm, max_set_freq_delay,
-                                 sys_read_freq ? sys_read_freq : read_frequency,
-                                 sys_set_freq ? sys_set_freq : set_frequency,
-                                 sys_apply_step_offset,
-                                 min_fastslew_offset, max_fastslew_rate,
-                                 sys_accrue_offset, sys_get_offset_correction,
-                                 set_leap, set_sync_status);
+  SYS_Generic_FinaliseClockDriver(driver);
+  Free(driver->context);
 }
 
 /* ================================================== */
 
-void
-SYS_Timex_Finalise(void)
+static int
+adjust_timex(clockid_t clock_id, struct timex *txc, int ignore_error)
 {
-  SYS_Generic_Finalise();
-}
-
-/* ================================================== */
-
-int
-SYS_Timex_Adjust(struct timex *txc, int ignore_error)
-{
-  static long last_constant, last_freq;
-  static int last_status = -1;
   int state;
 
 #ifdef SOLARIS
@@ -267,13 +299,47 @@ SYS_Timex_Adjust(struct timex *txc, int ignore_error)
     txc->constant = 10;
 #endif
 
+#ifdef LINUX
+  /* Older versions check the status for AUX clocks even when not being set */
+  if (!(txc->modes & MOD_STATUS))
+    txc->status = 0;
+
+  //TODO: add configure check? what about privops?
+  state = clock_adjtime(clock_id, txc);
+
+  if (state < 0) {
+    LOG(ignore_error ? LOGS_DEBUG : LOGS_FATAL,
+        "clock_adjtime(%ld, 0x%x) failed : %s", (long)clock_id, txc->modes,
+        strerror(errno));
+  }
+#else
+  if (clock_id != CLOCK_REALTIME)
+    LOG_FATAL("Unsupported clock");
+
   state = NTP_ADJTIME(txc);
 
   if (state < 0) {
     LOG(ignore_error ? LOGS_DEBUG : LOGS_FATAL,
         NTP_ADJTIME_NAME"(0x%x) failed : %s", txc->modes, strerror(errno));
-    return state;
   }
+#endif
+
+  return state;
+}
+
+/* ================================================== */
+
+int
+SYS_Timex_Adjust(clk_DriverContext *context, struct timex *txc, int ignore_error)
+{
+  struct timex_context *tc = context;
+  int state;
+
+  state = adjust_timex(CLK_GetId(tc->clock), txc, ignore_error);
+
+  /* Don't check garbage returned by PTP clocks */
+  if (!CLK_IsSystem(tc->clock))
+    return state;
 
   /* This a good place to verify that nothing else is touching the clock,
      without making an additional timex call.  A clock update is normally
@@ -282,14 +348,23 @@ SYS_Timex_Adjust(struct timex *txc, int ignore_error)
      - set_frequency - correcting frequency error
      - set_frequency - correcting phase error
      - set_sync_status - updating leap and estimated/maximum error */
-  if (last_status != -1 &&
-      (((last_status ^ txc->status) & STA_PLL && !(txc->modes & MOD_STATUS)) ||
-       (last_constant != txc->constant && !(txc->modes & MOD_TIMECONST)) ||
-       (last_freq != txc->freq && !(txc->modes & MOD_FREQUENCY))))
+  if (tc->last_status != -1 &&
+      (((tc->last_status ^ txc->status) & STA_PLL && !(txc->modes & MOD_STATUS)) ||
+       (tc->last_constant != txc->constant && !(txc->modes & MOD_TIMECONST)) ||
+       (tc->last_freq != txc->freq && !(txc->modes & MOD_FREQUENCY))))
     LOG(LOGS_WARN, "System clock interference detected (another NTP client?)");
-  last_status = txc->status;
-  last_constant = txc->constant;
-  last_freq = txc->freq;
+  tc->last_status = txc->status;
+  tc->last_constant = txc->constant;
+  tc->last_freq = txc->freq;
 
   return state;
+}
+
+/* ================================================== */
+
+void
+SYS_Timex_Read(clockid_t clock_id, struct timex *txc)
+{
+  memset(txc, 0, sizeof (*txc));
+  adjust_timex(clock_id, txc, 0);
 }

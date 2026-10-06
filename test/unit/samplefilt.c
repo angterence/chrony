@@ -33,8 +33,6 @@ test_unit(void)
   int i, j, k, sum_count, min_samples, max_samples;
   double mean, combine_ratio, sum_err;
 
-  LCL_Initialise();
-
   memset(&sample_in, 0, sizeof (sample_in));
   memset(&sample_out, 0, sizeof (sample_out));
 
@@ -115,6 +113,4 @@ test_unit(void)
 
     SPF_DestroyInstance(filter);
   }
-
-  LCL_Finalise();
 }

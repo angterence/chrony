@@ -29,11 +29,26 @@
 #ifndef GOT_SYS_H
 #define GOT_SYS_H
 
+#include "clocks.h"
+
+/* Open a system-specific clock (control is an in-out parameter) */
+extern int SYS_OpenClock(const char *name, int *control, clockid_t *id, int *fd, int *is_system);
+
+/* Get resolution of a clock in nanoseconds (also for system clocks
+   not returned by SYS_OpenClock()), 0 indicates unknown */
+extern int SYS_GetClockResolution(CLK_Instance clock);
+
+/* Read time from two clocks repeatedly, providing triplets of timestamps
+   from (clock1, clock2, clock1) (mode is an in-out parameter) */
+extern int SYS_GetClockReadings(CLK_Instance clock1, CLK_Instance clock2,
+                                int max_readings, int *mode, struct timespec tss[][3]);
+
 /* Called at the start of the run to do initialisation */
-extern void SYS_Initialise(int clock_control);
+extern void SYS_InitialiseClockDriver(struct clk_Driver *driver, CLK_Instance clock,
+                                      int control);
 
 /* Called at the end of the run to do final clean-up */
-extern void SYS_Finalise(void);
+extern void SYS_FinaliseClockDriver(struct clk_Driver *driver, int control);
 
 typedef enum {
   SYS_MAIN_PROCESS,

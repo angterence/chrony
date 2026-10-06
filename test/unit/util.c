@@ -813,6 +813,13 @@ test_unit(void)
   TEST_CHECK(strcmp(words[0], "a") == 0);
   TEST_CHECK(strcmp(words[1], "b") == 0);
 
+  TEST_CHECK(UTI_IsPrintableWord("abc", 4));
+  TEST_CHECK(UTI_IsPrintableWord("abc\0", 5));
+  TEST_CHECK(!UTI_IsPrintableWord("ab\x1b", 4));
+  TEST_CHECK(!UTI_IsPrintableWord("abc", 3));
+  TEST_CHECK(!UTI_IsPrintableWord("", 1));
+  TEST_CHECK(!UTI_IsPrintableWord("a c", 4));
+
   for (i = 0; i < 1000; i++) {
     UTI_GetRandomBytes(buf, sizeof (buf));
     memcpy(buf2, buf, sizeof (buf));

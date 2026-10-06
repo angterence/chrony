@@ -26,14 +26,23 @@
 #ifndef GOT_HWCLOCK_H
 #define GOT_HWCLOCK_H
 
+#include "clocks.h"
+
 typedef struct HCL_Instance_Record *HCL_Instance;
 
 /* Create a new HW clock instance */
-extern HCL_Instance HCL_CreateInstance(int min_samples, int max_samples,
+extern HCL_Instance HCL_CreateInstance(CLK_Instance hw_clock, CLK_Instance local_clock,
+                                       int min_samples, int max_samples,
                                        double min_separation, double precision);
 
 /* Destroy a HW clock instance */
 extern void HCL_DestroyInstance(HCL_Instance clock);
+
+extern void HCL_SlewLocal(HCL_Instance clock, struct timespec *cooked, double dfreq,
+                          double doffset);
+
+extern void HCL_SlewHw(HCL_Instance clock, struct timespec *cooked, double dfreq,
+                       double doffset);
 
 /* Check if a new sample should be accumulated at this time */
 extern int HCL_NeedsNewSample(HCL_Instance clock, struct timespec *now);
@@ -54,5 +63,11 @@ extern void HCL_AccumulateSample(HCL_Instance clock, struct timespec *hw_ts,
 /* Convert raw hardware time to cooked local time */
 extern int HCL_CookTime(HCL_Instance clock, struct timespec *raw, struct timespec *cooked,
                         double *err);
+
+/* Convert cooked local time to raw time */
+extern int HCL_UncookTime(HCL_Instance clock, struct timespec *cooked, struct timespec *raw,
+                          double *err);
+
+extern int HCL_GetFrequency(HCL_Instance clock, double *freq);
 
 #endif

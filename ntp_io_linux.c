@@ -35,8 +35,8 @@
 #include <net/if.h>
 
 #include "array.h"
+#include "clocks.h"
 #include "conf.h"
-#include "hwclock.h"
 #include "local.h"
 #include "logging.h"
 #include "memory.h"
@@ -53,9 +53,6 @@
 struct Interface {
   char name[IF_NAMESIZE];
   int if_index;
-  int phc_fd;
-  int phc_mode;
-  int phc_nocrossts;
   /* Link speed in mbit/s */
   int link_speed;
   /* Start of UDP data at layer 2 for IPv4 and IPv6 */
@@ -64,17 +61,8 @@ struct Interface {
   /* Compensation of errors in TX and RX timestamping */
   double tx_comp;
   double rx_comp;
-  HCL_Instance clock;
-  int maxpoll;
-  SCH_TimeoutID poll_timeout_id;
+  CLK_Instance clock;
 };
-
-/* Number of PHC readings per HW clock sample */
-#define PHC_READINGS 25
-
-/* Minimum and maximum interval between PHC readings */
-#define MIN_PHC_POLL -6
-#define MAX_PHC_POLL 20
 
 /* Maximum acceptable offset between SW/HW and daemon timestamp */
 #define MAX_TS_DELAY 1.0
@@ -117,17 +105,15 @@ static uint32_t last_saved_tx_id;
 
 /* ================================================== */
 
-static void poll_phc(struct Interface *iface, struct timespec *now);
-
-/* ================================================== */
-
 static int
 add_interface(CNF_HwTsInterface *conf_iface)
 {
-  int sock_fd, if_index, minpoll, phc_fd, req_hwts_flags, rx_filter;
+  int sock_fd, if_index, req_hwts_flags, rx_filter;
   struct ethtool_ts_info ts_info;
   struct hwtstamp_config ts_config;
   struct ifreq req;
+  char clock_name[sizeof (req.ifr_name) + 4];
+  CLK_Instance clock;
   unsigned int i;
   struct Interface *iface;
 
@@ -239,17 +225,23 @@ add_interface(CNF_HwTsInterface *conf_iface)
 
   SCK_CloseSocket(sock_fd);
 
-  phc_fd = SYS_Linux_OpenPHC(req.ifr_name, O_RDONLY);
-  if (phc_fd < 0)
+  snprintf(clock_name, sizeof (clock_name), "PHC:%s", req.ifr_name);
+
+  clock = CLK_Open(clock_name, 0);
+  if (!clock)
     return 0;
+
+  CLK_SetPoll(clock, conf_iface->minpoll, conf_iface->maxpoll);
+  CLK_SetSamples(clock, conf_iface->min_samples, conf_iface->max_samples);
+  if (conf_iface->nocrossts)
+    CLK_DisableCrossTimestamping(clock);
 
   iface = ARR_GetNewElement(interfaces);
 
+  iface->clock = clock;
+
   snprintf(iface->name, sizeof (iface->name), "%s", conf_iface->name);
   iface->if_index = if_index;
-  iface->phc_fd = phc_fd;
-  iface->phc_mode = 0;
-  iface->phc_nocrossts = conf_iface->nocrossts;
 
   /* Start with 1 gbit and no VLANs or IPv4/IPv6 options */
   iface->link_speed = 1000;
@@ -258,16 +250,6 @@ add_interface(CNF_HwTsInterface *conf_iface)
 
   iface->tx_comp = conf_iface->tx_comp;
   iface->rx_comp = conf_iface->rx_comp;
-
-  minpoll = CLAMP(MIN_PHC_POLL, conf_iface->minpoll, MAX_PHC_POLL);
-  iface->clock = HCL_CreateInstance(conf_iface->min_samples, conf_iface->max_samples,
-                                    UTI_Log2ToDouble(minpoll), conf_iface->precision);
-
-  iface->maxpoll = CLAMP(minpoll, conf_iface->maxpoll, MAX_PHC_POLL);
-
-  /* Do not schedule the first poll timeout here!  The argument (interface) can
-     move until all interfaces are added.  Wait for the first HW timestamp. */
-  iface->poll_timeout_id = 0;
 
   LOG(LOGS_INFO, "Enabled HW timestamping %son %s",
       ts_config.rx_filter == HWTSTAMP_FILTER_NONE ? "(TX only) " : "", iface->name);
@@ -414,8 +396,13 @@ NIO_Linux_Initialise(void)
     break;
   }
 
-  ts_flags = SOF_TIMESTAMPING_SOFTWARE | SOF_TIMESTAMPING_RX_SOFTWARE;
-  ts_tx_flags = SOF_TIMESTAMPING_TX_SOFTWARE;
+  ts_flags = 0;
+  ts_tx_flags = 0;
+
+  if (CLK_GetId(LCL_GetLocalClock()) == CLOCK_REALTIME) {
+    ts_flags = SOF_TIMESTAMPING_SOFTWARE | SOF_TIMESTAMPING_RX_SOFTWARE;
+    ts_tx_flags = SOF_TIMESTAMPING_TX_SOFTWARE;
+  }
 
   if (hwts) {
     ts_flags |= SOF_TIMESTAMPING_RAW_HARDWARE | SOF_TIMESTAMPING_RX_HARDWARE;
@@ -481,9 +468,7 @@ NIO_Linux_Finalise(void)
 
   for (i = 0; i < ARR_GetSize(interfaces); i++) {
     iface = ARR_GetElement(interfaces, i);
-    SCH_RemoveTimeout(iface->poll_timeout_id);
-    HCL_DestroyInstance(iface->clock);
-    close(iface->phc_fd);
+    CLK_Close(iface->clock);
   }
 
   ARR_DestroyInstance(interfaces);
@@ -552,62 +537,6 @@ get_interface(int if_index)
 /* ================================================== */
 
 static void
-poll_timeout(void *arg)
-{
-  struct Interface *iface = arg;
-  struct timespec now;
-
-  iface->poll_timeout_id = 0;
-
-  SCH_GetLastEventTime(&now, NULL, NULL);
-  poll_phc(iface, &now);
-}
-
-/* ================================================== */
-
-static void
-poll_phc(struct Interface *iface, struct timespec *now)
-{
-  struct timespec sample_phc_ts, sample_sys_ts, sample_local_ts;
-  struct timespec phc_readings[PHC_READINGS][3];
-  double phc_err, local_err, interval;
-  int n_readings, quality;
-
-  if (!HCL_NeedsNewSample(iface->clock, now))
-    return;
-
-  DEBUG_LOG("Polling PHC on %s%s",
-            iface->name, iface->poll_timeout_id != 0 ? " before timeout" : "");
-
-  n_readings = SYS_Linux_GetPHCReadings(iface->phc_fd, iface->phc_nocrossts,
-                                        &iface->phc_mode, PHC_READINGS, phc_readings);
-
-  /* Add timeout for the next poll in case no HW timestamp will be captured
-     between the minpoll and maxpoll.  Separate reading of different PHCs to
-     avoid long intervals between handling I/O events. */
-  SCH_RemoveTimeout(iface->poll_timeout_id);
-  interval = UTI_Log2ToDouble(iface->maxpoll);
-  iface->poll_timeout_id = SCH_AddTimeoutInClass(interval, interval /
-                                                   ARR_GetSize(interfaces) / 4, 0.1,
-                                                 SCH_PhcPollClass, poll_timeout, iface);
-
-  if (n_readings <= 0)
-    return;
-
-  if (!HCL_ProcessReadings(iface->clock, n_readings, phc_readings,
-                           &sample_phc_ts, &sample_sys_ts, &phc_err, &quality) ||
-      quality <= 0)
-    return;
-
-  LCL_CookTime(&sample_sys_ts, &sample_local_ts, &local_err);
-  HCL_AccumulateSample(iface->clock, &sample_phc_ts, &sample_local_ts, phc_err + local_err);
-
-  update_interface_speed(iface);
-}
-
-/* ================================================== */
-
-static void
 process_hw_timestamp(struct Interface *iface, struct timespec *hw_ts,
                      NTP_Local_Timestamp *local_ts, int rx_ntp_length, int family,
                      int l2_length)
@@ -615,7 +544,12 @@ process_hw_timestamp(struct Interface *iface, struct timespec *hw_ts,
   double rx_correction = 0.0, ts_delay, local_err;
   struct timespec ts;
 
-  poll_phc(iface, &local_ts->ts);
+  //TODO
+  static int speed_updated = 0;
+  if (!speed_updated) {
+    update_interface_speed(iface);
+    speed_updated = 1;
+  }
 
   /* We need to transpose RX timestamps as hardware timestamps are normally
      preamble timestamps and RX timestamps in NTP are supposed to be trailer
@@ -635,7 +569,7 @@ process_hw_timestamp(struct Interface *iface, struct timespec *hw_ts,
     UTI_AddDoubleToTimespec(hw_ts, rx_correction, hw_ts);
   }
 
-  if (!HCL_CookTime(iface->clock, hw_ts, &ts, &local_err))
+  if (!CLK_ConvertTime(iface->clock, 0, hw_ts, LCL_GetLocalClock(), 1, &ts, &local_err))
     return;
 
   if (!rx_ntp_length && iface->tx_comp)

@@ -47,6 +47,5 @@ extern void TST_Skip(int line);
 extern double TST_GetRandomDouble(double min, double max);
 extern void TST_GetRandomAddress(IPAddr *ip, int family, int bits);
 extern void TST_SwapAddressBit(IPAddr *ip, unsigned int b);
-extern void TST_RegisterDummyDrivers(void);
 
 #endif

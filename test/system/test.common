@@ -347,8 +347,8 @@ check_chronyd_messages() {
 	test_message 1 0 "checking chronyd messages"
 
 	grep -q 'chronyd exiting' "$logfile" && \
-		([ "$clock_control" -eq 0 ] || ! grep -q 'Disabled control of system clock' "$logfile") && \
-		([ "$clock_control" -ne 0 ] || grep -q 'Disabled control of system clock' "$logfile") && \
+		([ "$clock_control" -eq 0 ] || ! grep -q 'Disabled control of SYS:REALTIME' "$logfile") && \
+		([ "$clock_control" -ne 0 ] || grep -q 'Disabled control of SYS:REALTIME' "$logfile") && \
 		([ "$minimal_config" -ne 0 ] || grep -q 'Frequency .* read from' "$logfile") && \
 		([ "$TEST_SCFILTER" -eq 0 ] || grep -q -E 'Loaded (seccomp|pledge) filter' "$logfile") && \
 		grep -q 'chronyd exiting' "$logfile" && \

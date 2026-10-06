@@ -86,15 +86,15 @@ for maxpoll in -1 0 1; do
 	if check_config_h 'FEAT_DEBUG 1'; then
 		case $maxpoll in
 			-1)
-				check_log_messages "Polling PHC on eth0$" 360 380 || test_fail
+				check_log_messages "Polling PHC:eth0[^ ]*$" 360 380 || test_fail
 				check_log_messages "Polling PHC.*before" 3 25 || test_fail
 				;;
 			0)
-				check_log_messages "Polling PHC on eth0$" 8 45 || test_fail
+				check_log_messages "Polling PHC:eth0[^ ]*$" 8 45 || test_fail
 				check_log_messages "Polling PHC.*before" 150 190 || test_fail
 				;;
 			1)
-				check_log_messages "Polling PHC on eth0$" 1 1 || test_fail
+				check_log_messages "Polling PHC:eth0[^ ]*$" 1 1 || test_fail
 				check_log_messages "Polling PHC.*before" 194 199 || test_fail
 				;;
 		esac
